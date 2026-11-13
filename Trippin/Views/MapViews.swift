@@ -71,6 +71,7 @@ struct MapPlace: Identifiable, Equatable {
         localAddress = Self.bestLocalAddress(reservation.stops.lazy.compactMap(\.localAddress).first, address: reservation.address)
         searchName = Self.searchName(title: reservation.title, kind: reservation.kind, address: reservation.address)
         countryCode = reservation.stops.lazy.compactMap(\.countryCode).first
+        isApproximate = reservation.coordinate == nil || reservation.stops.contains(where: \.approximateLocation)
     }
 
     init(_ place: PlaceSearch.Place, localName: String? = nil, countryCode: String? = nil, hasLocation: Bool = true,

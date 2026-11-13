@@ -349,3 +349,47 @@ extension ClaudeClient {
         }
     }
 }
+
+// MARK: - Estimated locations
+
+extension ClaudeClient {
+    struct PlaceEstimate: Decodable {
+        var latitude: Double
+        var longitude: Double
+        /// Street address in English or pinyin, for showing alongside the local one.
+        var englishAddress: String
+    }
+
+    private struct LocateResult: Decodable {
+        var latitude: Double
+        var longitude: Double
+        var englishAddress: String
+    }
+
+    /// Estimates where a place is when Apple Maps can't find it (common for China
+    /// outside China). Returns nil when Claude can't place it even roughly.
+    func locate(name: String, localName: String?, address: String?) async throws -> PlaceEstimate? {
+        let schema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "latitude": ["type": "number", "description": "Best estimate of the latitude; 0 if you can't place it even roughly"],
+                "longitude": ["type": "number", "description": "Best estimate of the longitude; 0 if you can't place it even roughly"],
+                "englishAddress": ["type": "string", "description": "The address in English or pinyin, or empty"],
+            ],
+            "required": ["latitude", "longitude", "englishAddress"],
+            "additionalProperties": false,
+        ]
+        let system = """
+        You place hotels, restaurants and other venues on a map. Give your best estimate of the coordinates. \
+        If you don't know the exact venue, work from its street address (district, town, street). \
+        Answer 0 for both only if you can't place it within a few kilometers.
+        """
+        let prompt = [("Name", name), ("Local name", localName), ("Address", address)]
+            .compactMap { label, value in value.flatMap { $0.isEmpty ? nil : "\(label): \($0)" } }
+            .joined(separator: "\n")
+        let result = try await structured(LocateResult.self, system: system, prompt: prompt, schema: schema, effort: "low")
+        guard result.latitude != 0 || result.longitude != 0,
+              abs(result.latitude) <= 90, abs(result.longitude) <= 180 else { return nil }
+        return PlaceEstimate(latitude: result.latitude, longitude: result.longitude, englishAddress: result.englishAddress)
+    }
+}

@@ -173,12 +173,10 @@ struct RecommendationsView: View {
         for offset in offsets {
             let d = day + offset
             guard d >= 0, d < trip.dayCount else { continue }
-            let points = trip.stops(onDay: d).flatMap { [$0.coordinate, $0.arrivalCoordinate].compactMap { $0 } }
-            guard !points.isEmpty else { continue }
-            // After a flight, the day's later stops are where the traveler is.
-            let last = points.suffix(3)
-            let center = CLLocationCoordinate2D(latitude: last.map(\.latitude).reduce(0, +) / Double(last.count),
-                                                longitude: last.map(\.longitude).reduce(0, +) / Double(last.count))
+            // Where the traveler ends up that day: a flight's arrival, else the last located stop.
+            // (Averaging points would put a San Francisco to Beijing day in the Pacific.)
+            guard let center = trip.stops(onDay: d).reversed().lazy
+                    .compactMap({ $0.arrivalCoordinate ?? $0.coordinate }).first else { continue }
             return MKCoordinateRegion(center: center, latitudinalMeters: 40_000, longitudinalMeters: 40_000)
         }
         return nil

@@ -16,13 +16,19 @@ enum TripPlanner {
 
         extendTrip(trip, for: parsed)
 
-        let place = await locate(parsed, in: trip)
+        var place = await locate(parsed, in: trip)
+        var approximate = false
+        if place == nil, let estimate = await estimate(parsed) {
+            place = estimate
+            approximate = true
+        }
         reservation.latitude = place?.coordinate.latitude
         reservation.longitude = place?.coordinate.longitude
         if reservation.address == nil { reservation.address = place?.address }
         reservation.arrivalCoordinate = await locateArrival(parsed, in: trip)
 
-        makeStops(for: reservation, parsed: parsed, coordinate: place?.coordinate, in: trip, context: context)
+        let stops = makeStops(for: reservation, parsed: parsed, coordinate: place?.coordinate, in: trip, context: context)
+        for stop in stops { stop.approximateLocation = approximate }
         try? context.save()
         return reservation
     }
@@ -49,8 +55,15 @@ enum TripPlanner {
         extendTrip(trip, for: parsed)
 
         var coordinate = reservation.coordinate
+        // Keep "approximate" if the place didn't move; a fresh lookup decides it otherwise.
+        var approximate = reservation.stops.contains(where: \.approximateLocation)
         if moved {
-            let place = await locate(parsed, in: trip)
+            var place = await locate(parsed, in: trip)
+            approximate = false
+            if place == nil, let estimate = await estimate(parsed) {
+                place = estimate
+                approximate = true
+            }
             coordinate = place?.coordinate
             reservation.latitude = coordinate?.latitude
             reservation.longitude = coordinate?.longitude
@@ -65,6 +78,7 @@ enum TripPlanner {
 
         let stops = makeStops(for: reservation, parsed: parsed, coordinate: coordinate, in: trip, context: context)
         for (stop, note) in zip(stops, notes) { stop.note = note }
+        for stop in stops { stop.approximateLocation = approximate }
         if let localAddress {
             for stop in stops { stop.localAddress = localAddress }
         }
@@ -112,6 +126,63 @@ enum TripPlanner {
             }
         }
         try? context.save()
+    }
+
+    /// Claude's estimate for a booking Apple Maps can't find (hotels, restaurants;
+    /// not flights or trains, whose airports and stations Apple Maps knows).
+    private static func estimate(_ parsed: ParsedReservation) async -> PlaceSearch.Place? {
+        guard !parsed.kind.isJourney, KeychainStore.hasAPIKey,
+              let found = try? await ClaudeClient().locate(name: parsed.title, localName: parsed.localName, address: parsed.address)
+        else { return nil }
+        return PlaceSearch.Place(name: parsed.title, address: parsed.address ?? found.englishAddress,
+                                 coordinate: CLLocationCoordinate2D(latitude: found.latitude, longitude: found.longitude))
+    }
+
+    /// Bookings already tried this launch, so an unplaceable one isn't asked about on every visit.
+    private static var triedToLocate = Set<UUID>()
+
+    /// Retries bookings that have no location yet (for example, imported before Claude
+    /// could estimate it, or before Apple Maps knew it). Uses Apple Maps first, then Claude.
+    static func locateMissing(_ trip: Trip, context: ModelContext) async {
+        let missing = trip.reservations.filter { $0.coordinate == nil && !$0.kind.isJourney && !triedToLocate.contains($0.id) }
+        for reservation in missing {
+            triedToLocate.insert(reservation.id)
+            let fields = reservation.fields
+            var approximate = false
+            var place = await locate(fields, in: trip)
+            if place == nil {
+                place = await estimate(fields)
+                approximate = place != nil
+            }
+            guard let place else { continue }
+            setLocation(of: reservation, to: place.coordinate, approximate: approximate)
+        }
+        try? context.save()
+    }
+
+    /// Moves a booking and its stops to a new point and refreshes their local details.
+    static func setLocation(of reservation: Reservation, to coordinate: CLLocationCoordinate2D, approximate: Bool) {
+        reservation.latitude = coordinate.latitude
+        reservation.longitude = coordinate.longitude
+        for stop in reservation.stops {
+            stop.coordinate = coordinate
+            stop.approximateLocation = approximate
+            stop.countryCode = nil
+            stop.localLookupDone = false
+        }
+    }
+
+    /// Puts a stop exactly where the traveler dropped the pin. For a booking's stop,
+    /// the booking and its other stops move too.
+    static func pin(_ stop: Stop, at coordinate: CLLocationCoordinate2D) {
+        if let reservation = stop.reservation {
+            setLocation(of: reservation, to: coordinate, approximate: false)
+        } else {
+            stop.coordinate = coordinate
+            stop.approximateLocation = false
+            stop.countryCode = nil
+            stop.localLookupDone = false
+        }
     }
 
     private static func locateArrival(_ parsed: ParsedReservation, in trip: Trip) async -> CLLocationCoordinate2D? {

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import MapKit
 
 // Read-only pages shown when a stop or reservation is tapped. Editing is behind
 // the Edit button at the top right.
@@ -23,6 +24,7 @@ struct StopDetailView: View {
     let stop: Stop
     let trip: Trip
     @State private var editing: EditTarget?
+    @State private var pinning = false
 
     var body: some View {
         NavigationStack {
@@ -56,7 +58,8 @@ struct StopDetailView: View {
             }
 
             PlaceSection(place: MapPlace(stop: stop, number: nil), flights: stop.reservation.flatMap(FlightPath.init).map { [$0] } ?? [],
-                         address: stop.address, localAddress: stop.localAddress)
+                         address: stop.address, localAddress: stop.localAddress,
+                         onAdjustPin: stop.reservation?.kind.isJourney == true ? nil : { pinning = true })
 
             if let reservation = stop.reservation {
                 Section("Booking") {
@@ -74,6 +77,10 @@ struct StopDetailView: View {
             ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             ToolbarItem(placement: .primaryAction) { Button("Edit") { editing = .stop(stop) } }
         }
+        .sheet(isPresented: $pinning) {
+            PinPickerView(title: stop.reservation?.title ?? stop.name,
+                          start: stop.coordinate ?? nearbyCoordinate) { TripPlanner.pin(stop, at: $0) }
+        }
         .sheet(item: $editing) { target in
             switch target {
             case .stop(let stop):
@@ -85,6 +92,13 @@ struct StopDetailView: View {
     }
 }
 
+extension StopDetailView {
+    /// Somewhere on the same or a nearby day, to start the pin picker close by.
+    var nearbyCoordinate: CLLocationCoordinate2D? {
+        RecommendationsView.region(near: stop.dayIndex, in: trip)?.center
+    }
+}
+
 // MARK: - Reservation
 
 struct ReservationDetailView: View {
@@ -93,6 +107,7 @@ struct ReservationDetailView: View {
     /// False when pushed from a stop's page, which already has a Done button.
     var isRoot = true
     @State private var editing = false
+    @State private var pinning = false
 
     var body: some View {
         if isRoot {
@@ -137,7 +152,8 @@ struct ReservationDetailView: View {
             }
 
             PlaceSection(place: MapPlace(reservation), flights: FlightPath(reservation).map { [$0] } ?? [],
-                         address: reservation.address, localAddress: reservation.stops.lazy.compactMap(\.localAddress).first)
+                         address: reservation.address, localAddress: reservation.stops.lazy.compactMap(\.localAddress).first,
+                         onAdjustPin: reservation.kind.isJourney ? nil : { pinning = true })
 
             if !reservation.stops.isEmpty {
                 Section("On your itinerary") {
@@ -164,6 +180,19 @@ struct ReservationDetailView: View {
             ToolbarItem(placement: .primaryAction) { Button("Edit") { editing = true } }
         }
         .sheet(isPresented: $editing) { ReservationEditorView(reservation: reservation) }
+        .sheet(isPresented: $pinning) {
+            PinPickerView(title: reservation.title, start: reservation.coordinate ?? nearbyCoordinate) {
+                TripPlanner.setLocation(of: reservation, to: $0, approximate: false)
+            }
+        }
+    }
+}
+
+extension ReservationDetailView {
+    var nearbyCoordinate: CLLocationCoordinate2D? {
+        guard let trip = reservation.trip else { return nil }
+        let day = reservation.stops.map(\.dayIndex).min() ?? 0
+        return RecommendationsView.region(near: day, in: trip)?.center
     }
 }
 
@@ -202,9 +231,11 @@ private struct PlaceSection: View {
     let flights: [FlightPath]
     let address: String?
     let localAddress: String?
+    /// Shown for places the traveler can pin themselves (not flights or trains).
+    var onAdjustPin: (() -> Void)? = nil
 
     var body: some View {
-        Section("Place") {
+        Section {
             if place.coordinate != nil {
                 TripMapView(places: [place], showRoute: false, flights: flights, selection: .constant(nil))
                     .frame(height: 180)
@@ -224,6 +255,17 @@ private struct PlaceSection: View {
             // Without an exact location the maps app searches by name.
             OpenInMapsButton(place: place) {
                 Label(place.isApproximate ? "Search in Maps" : "Open in Maps", systemImage: "map")
+            }
+            if let onAdjustPin {
+                Button(action: onAdjustPin) {
+                    Label(place.coordinate == nil ? "Set location on map" : "Adjust pin on map", systemImage: "mappin.and.ellipse")
+                }
+            }
+        } header: {
+            Text("Place")
+        } footer: {
+            if place.coordinate != nil, place.isApproximate {
+                Text("Approximate location. Apple Maps doesn't list this place, so Claude estimated it. Adjust the pin if it's off.")
             }
         }
     }
