@@ -75,7 +75,7 @@ struct PastePlacesView: View {
                     }
                 }
             }
-            .navigationTitle("Paste places")
+            .navigationTitle("Paste itinerary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

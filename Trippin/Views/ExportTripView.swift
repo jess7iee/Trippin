@@ -104,7 +104,7 @@ struct ExportTripView: View {
                     if let exportError { Text(exportError).foregroundStyle(.red) } else { Text(format.footer) }
                 }
             }
-            .navigationTitle("Export trip")
+            .navigationTitle("Export itinerary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }

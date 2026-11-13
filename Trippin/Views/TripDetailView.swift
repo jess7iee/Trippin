@@ -34,15 +34,15 @@ struct TripDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button { showingImport = true } label: { Label("Add reservation from email", systemImage: "envelope.open") }
-                    Button { showingRecommendations = true } label: { Label("Get recommendations", systemImage: "sparkles") }
-                    Button { showingPastePlaces = true } label: { Label("Paste places list", systemImage: "list.bullet.clipboard") }
-                    Button { showingExport = true } label: { Label("Export as web page", systemImage: "square.and.arrow.up") }
+                    Button { showingImport = true } label: { Label("Import from E-mail", systemImage: "envelope.open") }
+                    Button { showingPastePlaces = true } label: { Label("Paste itinerary", systemImage: "list.bullet.clipboard") }
+                    Button { showingExport = true } label: { Label("Export itinerary", systemImage: "square.and.arrow.up") }
+                    Button { showingRecommendations = true } label: { Label("Recommendations", systemImage: "sparkles") }
                     Button { showingEditor = true } label: { Label("Edit trip", systemImage: "pencil") }
                 } label: {
                     Image(systemName: "plus.circle")
                 }
-                .accessibilityLabel("Add")
+                .accessibilityLabel("Trip options")
             }
         }
         .sheet(isPresented: $showingImport) { ImportEmailView(trip: trip, initialText: "") }
