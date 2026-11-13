@@ -108,6 +108,7 @@ extension ClaudeClient {
             var start: String
             var end: String
             var location: String
+            var localName: String
         }
         var reservations: [Item]
     }
@@ -124,8 +125,9 @@ extension ClaudeClient {
                 "start": ["type": "string", "description": "Local start time as yyyy-MM-dd'T'HH:mm, or yyyy-MM-dd if no time. Empty if unknown."],
                 "end": ["type": "string", "description": "Local end time in the same format, or empty"],
                 "location": ["type": "string", "description": "Street address, or venue name and city, to find it on a map. For flights, the departure airport name."],
+                "localName": ["type": "string", "description": "The hotel, restaurant, station or venue name as written in the local language and script, if the email shows it or you know it for certain; otherwise empty"],
             ],
-            "required": ["kind", "title", "confirmationCode", "start", "end", "location"],
+            "required": ["kind", "title", "confirmationCode", "start", "end", "location", "localName"],
             "additionalProperties": false,
         ]
         let schema: [String: Any] = [
@@ -148,7 +150,8 @@ extension ClaudeClient {
                 confirmationCode: item.confirmationCode.isEmpty ? nil : item.confirmationCode,
                 start: Self.parseLocalDate(item.start),
                 end: Self.parseLocalDate(item.end),
-                address: item.location.isEmpty ? nil : item.location
+                address: item.location.isEmpty ? nil : item.location,
+                localName: item.localName.isEmpty ? nil : item.localName
             )
         }
     }
@@ -166,11 +169,69 @@ extension ClaudeClient {
     }
 }
 
+// MARK: - Local-language names
+
+extension ClaudeClient {
+    struct PlaceToName {
+        var name: String
+        var address: String?
+    }
+
+    private struct LocalNameResult: Decodable {
+        struct Item: Decodable {
+            var index: Int
+            var localName: String
+        }
+        var names: [Item]
+    }
+
+    /// Returns each place's name as written locally, in the same order. Empty string when unknown.
+    func localNames(for places: [PlaceToName], language: LocalLanguage, near destination: String) async throws -> [String] {
+        guard !places.isEmpty else { return [] }
+        let schema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "names": [
+                    "type": "array",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "index": ["type": "integer"],
+                            "localName": ["type": "string", "description": "Name in \(language.name), or empty if unsure"],
+                        ],
+                        "required": ["index", "localName"],
+                        "additionalProperties": false,
+                    ],
+                ],
+            ],
+            "required": ["names"],
+            "additionalProperties": false,
+        ]
+        let system = """
+        You give the names of places as they are written locally in \(language.name): the name on the \
+        building's signs, the official station name (e.g. 新宿駅, not a translation of "Shinjuku Station"), \
+        or the name a taxi driver or local would recognize. Use the local script. If you don't know a \
+        place's real local name, return an empty string rather than inventing a translation.
+        """
+        let list = places.enumerated().map { index, place in
+            "\(index). \(place.name)" + (place.address.map { " — \($0)" } ?? "")
+        }.joined(separator: "\n")
+        let result = try await structured(LocalNameResult.self, system: system,
+                                          prompt: "Places near \(destination):\n\(list)", schema: schema, effort: "low")
+        var names = Array(repeating: "", count: places.count)
+        for item in result.names where names.indices.contains(item.index) {
+            names[item.index] = item.localName.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return names
+    }
+}
+
 // MARK: - Recommendations
 
 struct Recommendation: Decodable, Identifiable, Hashable {
     var id: String { name + searchQuery }
     var name: String
+    var localName: String
     var searchQuery: String
     var category: String
     var reason: String
@@ -199,6 +260,7 @@ extension ClaudeClient {
             "type": "object",
             "properties": [
                 "name": ["type": "string", "description": "Real place name"],
+                "localName": ["type": "string", "description": "The name as written locally in the destination's language and script (e.g. 一蘭 渋谷店), or empty if it is the same or unknown"],
                 "searchQuery": ["type": "string", "description": "Query that finds this exact place in Apple Maps, including neighborhood and city"],
                 "category": ["type": "string", "description": "e.g. food, sight, shopping, errand, nightlife"],
                 "reason": ["type": "string", "description": "One sentence on why it fits"],
@@ -206,7 +268,7 @@ extension ClaudeClient {
                 "suggestedDay": ["type": "integer", "description": "1-based day number that keeps the day geographically tight"],
                 "durationMinutes": ["type": "integer"],
             ],
-            "required": ["name", "searchQuery", "category", "reason", "forTodo", "suggestedDay", "durationMinutes"],
+            "required": ["name", "localName", "searchQuery", "category", "reason", "forTodo", "suggestedDay", "durationMinutes"],
             "additionalProperties": false,
         ]
         let schema: [String: Any] = [

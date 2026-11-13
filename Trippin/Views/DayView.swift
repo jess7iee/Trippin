@@ -180,6 +180,12 @@ private struct StopRow: View {
                     Image(systemName: stop.symbol).foregroundStyle(.secondary).font(.caption)
                     Text(stop.name).font(.body.weight(.medium))
                 }
+                if let local = stop.distinctLocalName {
+                    Text(local)
+                        .font(.subheadline)
+                        .textSelection(.enabled)
+                        .accessibilityLabel("Local name: \(local)")
+                }
                 if let time = stop.fixedTime {
                     Text(time.formatted(date: .omitted, time: .shortened))
                         .font(.subheadline.weight(.semibold))
@@ -188,8 +194,9 @@ private struct StopRow: View {
                 if !stop.note.isEmpty {
                     Text(stop.note).font(.subheadline).foregroundStyle(.secondary)
                 }
-                if let address = stop.address {
+                if let address = stop.address ?? stop.localAddress {
                     Text(address).font(.caption).foregroundStyle(.tertiary).lineLimit(2)
+                        .textSelection(.enabled)
                 } else if stop.coordinate == nil {
                     Text("Location not found").font(.caption).foregroundStyle(.orange)
                 }

@@ -142,6 +142,9 @@ struct ReservationRow: View {
                 .foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(reservation.title).font(.body.weight(.medium))
+                if let local = reservation.localName, !local.isEmpty, local != reservation.title {
+                    Text(local).font(.subheadline).textSelection(.enabled)
+                }
                 if let start = reservation.start {
                     Text(timeRange(start, reservation.end)).font(.subheadline).foregroundStyle(.secondary)
                 }

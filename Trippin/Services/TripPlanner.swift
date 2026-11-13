@@ -34,6 +34,7 @@ enum TripPlanner {
                             sortOrder: sortOrder(for: date, inDay: day, of: trip),
                             fixedTime: date,
                             symbol: parsed.kind.symbol)
+            stop.localName = parsed.localName
             context.insert(stop)
             stop.trip = trip
             stop.reservation = reservation
@@ -66,11 +67,12 @@ enum TripPlanner {
         return (stops.last?.sortOrder ?? 0) + 1
     }
 
-    static func addStop(_ place: PlaceSearch.Place, note: String = "", symbol: String = "mappin",
+    static func addStop(_ place: PlaceSearch.Place, localName: String? = nil, note: String = "", symbol: String = "mappin",
                         day: Int, to trip: Trip, context: ModelContext) {
         let order = (trip.stops(onDay: day).last?.sortOrder ?? 0) + 1
         let stop = Stop(name: place.name, address: place.address, coordinate: place.coordinate,
                         dayIndex: day, sortOrder: order, note: note, symbol: symbol)
+        stop.localName = (localName?.isEmpty ?? true) ? nil : localName
         context.insert(stop)
         stop.trip = trip
         try? context.save()

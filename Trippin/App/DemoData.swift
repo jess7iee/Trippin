@@ -29,22 +29,23 @@ enum DemoData {
 
         let hotel = Reservation(from: ParsedReservation(kind: .hotel, title: "Park Hyatt Tokyo", confirmationCode: "88231045",
                                                         start: at(0, 15), end: at(3, 12),
-                                                        address: "3-7-1-2 Nishi Shinjuku, Shinjuku, Tokyo"), rawText: "")
+                                                        address: "3-7-1-2 Nishi Shinjuku, Shinjuku, Tokyo", localName: "パーク ハイアット 東京"), rawText: "")
         hotel.latitude = 35.6856; hotel.longitude = 139.6907
         let dinner = Reservation(from: ParsedReservation(kind: .restaurant, title: "Sushi Saito", confirmationCode: "RS2291A",
-                                                         start: at(1, 19, 30), address: "Minato, Tokyo"), rawText: "")
+                                                         start: at(1, 19, 30), address: "Minato, Tokyo", localName: "鮨 さいとう"), rawText: "")
         dinner.latitude = 35.6672; dinner.longitude = 139.7400
         for r in [hotel, dinner] { context.insert(r); r.trip = trip }
 
-        let stops: [(String, Double, Double, Int, Date?, String, Reservation?)] = [
-            ("Check in: Park Hyatt Tokyo", 35.6856, 139.6907, 0, at(0, 15), "bed.double.fill", hotel),
-            ("Omoide Yokocho", 35.6930, 139.6995, 0, nil, "fork.knife", nil),
-            ("Senso-ji", 35.7148, 139.7967, 1, nil, "building.columns.fill", nil),
-            ("Meiji Jingu", 35.6764, 139.6993, 1, nil, "leaf.fill", nil),
-            ("Tokyo Skytree", 35.7101, 139.8107, 1, nil, "star.fill", nil),
-            ("Sushi Saito", 35.6672, 139.7400, 1, at(1, 19, 30), "fork.knife", dinner),
-            ("teamLab Planets", 35.6491, 139.7898, 2, nil, "star.fill", nil),
-            ("Check out: Park Hyatt Tokyo", 35.6856, 139.6907, 3, at(3, 12), "bed.double.fill", hotel),
+        let stops: [(String, Double, Double, Int, Date?, String, Reservation?, String)] = [
+            ("Check in: Park Hyatt Tokyo", 35.6856, 139.6907, 0, at(0, 15), "bed.double.fill", hotel, "パーク ハイアット 東京"),
+            ("Omoide Yokocho", 35.6930, 139.6995, 0, nil, "fork.knife", nil, "思い出横丁"),
+            ("Senso-ji", 35.7148, 139.7967, 1, nil, "building.columns.fill", nil, "浅草寺"),
+            ("Meiji Jingu", 35.6764, 139.6993, 1, nil, "leaf.fill", nil, "明治神宮"),
+            ("Tokyo Skytree", 35.7101, 139.8107, 1, nil, "star.fill", nil, "東京スカイツリー"),
+            ("Sushi Saito", 35.6672, 139.7400, 1, at(1, 19, 30), "fork.knife", dinner, "鮨 さいとう"),
+            ("teamLab Planets", 35.6491, 139.7898, 2, nil, "star.fill", nil, "チームラボプラネッツ TOKYO DMM"),
+            ("Shinjuku Station", 35.6896, 139.7006, 3, nil, "tram.fill", nil, "新宿駅"),
+            ("Check out: Park Hyatt Tokyo", 35.6856, 139.6907, 3, at(3, 12), "bed.double.fill", hotel, "パーク ハイアット 東京"),
         ]
         for (index, s) in stops.enumerated() {
             let stop = Stop(name: s.0, coordinate: CLLocationCoordinate2D(latitude: s.1, longitude: s.2),
@@ -52,6 +53,7 @@ enum DemoData {
             context.insert(stop)
             stop.trip = trip
             stop.reservation = s.6
+            stop.localName = s.7
         }
         for text in ["Best ramen", "Buy a SIM card", "Souvenirs for mom"] {
             let todo = TodoItem(text: text)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import MapKit
 
 /// A place to show on a map or open in a maps app.
@@ -10,6 +11,8 @@ struct MapPlace: Identifiable, Equatable {
     var day: Int
     var symbol: String
     var number: Int?
+    var localName: String?
+    var localAddress: String?
 
     static func == (a: MapPlace, b: MapPlace) -> Bool { a.id == b.id && a.number == b.number }
 
@@ -26,6 +29,8 @@ struct MapPlace: Identifiable, Equatable {
         day = stop.dayIndex
         symbol = stop.symbol
         self.number = number
+        localName = stop.distinctLocalName
+        localAddress = stop.localAddress
     }
 
     init(_ reservation: Reservation) {
@@ -35,6 +40,8 @@ struct MapPlace: Identifiable, Equatable {
         coordinate = reservation.coordinate
         day = 0
         symbol = reservation.kind.symbol
+        localName = reservation.localName
+        localAddress = reservation.stops.lazy.compactMap(\.localAddress).first
     }
 
     init(_ place: PlaceSearch.Place) {
@@ -121,6 +128,7 @@ struct TripMapView: View {
 
 private struct OpenInMapsDialog: ViewModifier {
     @Binding var place: MapPlace?
+    @State private var card: MapPlace?
 
     func body(content: Content) -> some View {
         content.confirmationDialog(place?.name ?? "", isPresented: Binding(
@@ -129,17 +137,77 @@ private struct OpenInMapsDialog: ViewModifier {
         ), titleVisibility: .visible, presenting: place) { place in
             ForEach(MapsApp.allCases) { app in
                 Button("Open in \(app.name)") {
-                    app.open(name: place.name, coordinate: place.coordinate, address: place.address)
+                    app.open(name: searchName(place, for: app), coordinate: place.coordinate, address: place.address)
                 }
             }
             ForEach(MapsApp.allCases) { app in
                 Button("Directions in \(app.name)") {
-                    app.open(name: place.name, coordinate: place.coordinate, address: place.address, directions: true)
+                    app.open(name: searchName(place, for: app), coordinate: place.coordinate, address: place.address, directions: true)
                 }
+            }
+            if place.localName != nil || place.localAddress != nil {
+                Button("Show in local language") { card = place }
             }
             Button("Cancel", role: .cancel) {}
         } message: { place in
-            if let address = place.address { Text(address) }
+            if let local = place.localName {
+                Text([local, place.address].compactMap { $0 }.joined(separator: "\n"))
+            } else if let address = place.address {
+                Text(address)
+            }
+        }
+        .sheet(item: $card) { LocalNameCard(place: $0) }
+    }
+
+    /// Amap searches best with the local (Chinese) name.
+    private func searchName(_ place: MapPlace, for app: MapsApp) -> String {
+        app == .amap ? (place.localName ?? place.name) : place.name
+    }
+}
+
+/// Big, clear local name and address to show a taxi driver, station staff or a host.
+struct LocalNameCard: View {
+    @Environment(\.dismiss) private var dismiss
+    let place: MapPlace
+    @State private var copied = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if let local = place.localName {
+                        Text(local)
+                            .font(.system(size: 44, weight: .bold))
+                            .minimumScaleFactor(0.5)
+                            .textSelection(.enabled)
+                    }
+                    if let address = place.localAddress {
+                        Text(address)
+                            .font(.title2)
+                            .textSelection(.enabled)
+                    }
+                    Divider()
+                    Text(place.name).font(.headline).foregroundStyle(.secondary)
+                    if let address = place.address {
+                        Text(address).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
+            }
+            .navigationTitle("Show this")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        UIPasteboard.general.string = [place.localName, place.localAddress].compactMap { $0 }.joined(separator: "\n")
+                        copied = true
+                    } label: {
+                        Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                }
+            }
         }
     }
 }

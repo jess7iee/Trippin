@@ -3,6 +3,7 @@ import SwiftData
 
 /// A trip split into pages: Summary, Day 1, Day 2, …
 struct TripDetailView: View {
+    @Environment(\.modelContext) private var context
     @Bindable var trip: Trip
     /// -1 is the Summary page; 0… are days.
     @State private var page = -1
@@ -43,6 +44,9 @@ struct TripDetailView: View {
         .sheet(isPresented: $showingImport) { ImportEmailView(trip: trip, initialText: "") }
         .sheet(isPresented: $showingRecommendations) { RecommendationsView(trip: trip) }
         .sheet(isPresented: $showingEditor) { TripEditorView(trip: trip) }
+        .task(id: trip.stops.count) {
+            await LocalNames.fill(trip, context: context)
+        }
         .onChange(of: trip.dayCount) { _, count in
             if page >= count { page = count - 1 }
         }
