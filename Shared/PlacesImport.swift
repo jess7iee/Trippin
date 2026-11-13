@@ -115,3 +115,76 @@ private extension Optional where Wrapped == String {
         return s
     }
 }
+
+// MARK: - Prompt for an AI chat
+
+extension PlacesImport {
+    /// One hotel stay, for filling in the prompt.
+    struct PromptStay {
+        var name: String
+        var address: String?
+        var checkIn: Date
+        var checkOut: Date?
+    }
+
+    /// A prompt to paste into an AI chat (Claude with web search, say). Its answer is a
+    /// places list that `parse` reads. The trip's dates and hotels are filled in; the
+    /// traveler adds what they want to do.
+    static func prompt(tripName: String, start: Date, end: Date, stays: [PromptStay], fixedPlans: [String]) -> String {
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.dateFormat = "yyyy-MM-dd"
+        let stayLines = stays.isEmpty
+            ? "- 住在：[酒店名和地址]"
+            : stays.map { s in
+                let dates = day.string(from: s.checkIn) + (s.checkOut.map { " 到 " + day.string(from: $0) } ?? "")
+                return "- 住在：\(s.name)\(s.address.map { "（\($0)）" } ?? "")，\(dates)"
+            }.joined(separator: "\n")
+        let plans = fixedPlans.isEmpty ? "[例如 11月17日 18:55 到达机场]" : fixedPlans.joined(separator: "；")
+
+        return """
+        你是我的旅行规划助手。请根据下面的行程信息，推荐具体、真实、目前仍在营业的地点，并安排到每一天。
+
+        【行程】\(tripName)
+        - 日期：\(day.string(from: start)) 到 \(day.string(from: end))
+        \(stayLines)
+        - 已确定的安排：\(plans)
+        - 想规划的城市和日期：[例如 昆明，11月17日到21日]
+        - 想做的事：[例如 spa、菌子火锅、本地小吃、骑行、咖啡馆和书店]
+        - 偏好：[例如 节奏慢一点、预算中等、不吃辣]
+
+        【要求】
+        1. 先用网上的最新信息核实每个地点存在且在营业；不确定的不要推荐。
+        2. 每天安排 2–5 个地点，按时间顺序，离住处或当天行程不要太远；到达日和离开日少排一些。
+        3. 只输出一个 JSON 代码块，代码块前后可以有简短说明，但 JSON 里不要有注释。
+
+        【JSON 格式】
+        {"trippinPlaces": 1, "places": [
+          {
+            "date": "YYYY-MM-DD",
+            "time": "HH:mm",
+            "name": "英文或拼音名称",
+            "localName": "当地语言名称",
+            "address": "当地语言的完整地址",
+            "latitude": 25.0478,
+            "longitude": 102.7036,
+            "category": "food",
+            "searchQuery": "在高德或大众点评里能搜到它的关键词",
+            "note": "一两句话：为什么推荐、点什么、注意事项"
+          }
+        ]}
+
+        字段说明：
+        - date：必填，当地日期，必须在行程日期内。
+        - time：可选，24 小时制当地时间。
+        - name：必填，英文或拼音名称。
+        - localName：当地语言名称；中国地点写中文全名，含分店，如 东来顺饭庄（王府井店）。
+        - address：可选，当地语言的完整地址，只写确定的。
+        - latitude / longitude：可选，只在确定准确时一起填写，否则都省略，不要编造。
+        - category：food / cafe / bookstore / park / nature / spa / shop / museum / sight / nightlife 之一。
+        - searchQuery：在高德或大众点评里能搜到它的关键词；中国地点用中文，如 "翠湖公园 昆明"。
+        - note：一两句话，为什么推荐、点什么、是否需预约、营业时间等。
+        不确定的字段直接省略。
+        """
+    }
+}

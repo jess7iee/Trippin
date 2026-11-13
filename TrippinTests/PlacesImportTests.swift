@@ -39,3 +39,20 @@ struct PlacesImportTests {
         #expect(throws: PlacesImport.ImportError.noPlaces) { try PlacesImport.parse(#"{"places": [{"name": "No date"}]}"#) }
     }
 }
+
+struct PlacesPromptTests {
+    @Test func promptIncludesTripAndParsableExample() throws {
+        let cal = Calendar.current
+        let start = cal.date(from: DateComponents(year: 2027, month: 3, day: 1))!
+        let end = cal.date(from: DateComponents(year: 2027, month: 3, day: 5))!
+        let prompt = PlacesImport.prompt(tripName: "Test trip", start: start, end: end,
+                                         stays: [.init(name: "Hotel A", address: "示例市1号", checkIn: start, checkOut: end)],
+                                         fixedPlans: ["3月1日 10:00 到达"])
+        #expect(prompt.contains("2027-03-01 到 2027-03-05"))
+        #expect(prompt.contains("Hotel A（示例市1号）"))
+        #expect(prompt.contains("3月1日 10:00 到达"))
+        // The example in the prompt is itself a valid list (with a placeholder date).
+        let example = prompt.replacingOccurrences(of: "YYYY-MM-DD", with: "2027-03-02")
+        #expect(try PlacesImport.parse(example).first?.name == "英文或拼音名称")
+    }
+}

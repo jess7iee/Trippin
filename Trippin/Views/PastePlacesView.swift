@@ -14,10 +14,24 @@ struct PastePlacesView: View {
     @State private var places: [PlacesImport.Place] = []
     @State private var excluded = Set<UUID>()
     @State private var error: String?
+    @State private var copied = false
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button {
+                        UIPasteboard.general.string = prompt
+                        copied = true
+                    } label: {
+                        Label(copied ? "Prompt copied" : "Copy AI prompt", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                } header: {
+                    Text("Make a list")
+                } footer: {
+                    Text("Copies a prompt with this trip's dates and hotels. Paste it into Claude (with web search on), add what you'd like to do, then paste its answer below.")
+                }
+
                 Section {
                     TextEditor(text: $text)
                         .frame(height: places.isEmpty ? 200 : 90)
@@ -100,6 +114,18 @@ struct PastePlacesView: View {
         }
         .buttonStyle(.plain)
         .accessibilityValue(on ? "Selected" : "Not selected")
+    }
+
+    private var prompt: String {
+        let stays = trip.reservations.filter { $0.kind == .hotel && $0.start != nil }
+            .sorted { $0.start! < $1.start! }
+            .map { PlacesImport.PromptStay(name: $0.title, address: $0.address, checkIn: $0.start!, checkOut: $0.end) }
+        let time = DateFormatter()
+        time.dateFormat = "M月d日 HH:mm"
+        let plans = trip.sortedReservations.filter { $0.kind.isJourney }.compactMap { r in
+            r.start.map { "\(time.string(from: $0)) \(r.title)" }
+        }
+        return PlacesImport.prompt(tripName: trip.name, start: trip.startDate, end: trip.endDate, stays: stays, fixedPlans: plans)
     }
 
     private var days: [Int] {
