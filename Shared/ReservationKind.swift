@@ -29,6 +29,29 @@ enum ReservationKind: String, Codable, CaseIterable, Identifiable {
         case .other: "doc.text.fill"
         }
     }
+
+    /// Label for the start time, e.g. "Check in" for a hotel.
+    var startLabel: String {
+        switch self {
+        case .hotel: "Check in"
+        case .flight, .train: "Departs"
+        case .car: "Pick up"
+        default: "Starts"
+        }
+    }
+
+    /// Label for the end time, e.g. "Check out" for a hotel.
+    var endLabel: String {
+        switch self {
+        case .hotel: "Check out"
+        case .flight, .train: "Arrives"
+        case .car: "Drop off"
+        default: "Ends"
+        }
+    }
+
+    /// Hotels and car rentals get a stop on both their first and last day.
+    var spansDays: Bool { self == .hotel || self == .car }
 }
 
 /// A reservation pulled out of an email, before it is saved to a trip.

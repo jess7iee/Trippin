@@ -10,6 +10,7 @@ struct SummaryView: View {
 
     @State private var newTodo = ""
     @State private var placeToOpen: MapPlace?
+    @State private var editingReservation: Reservation?
 
     var body: some View {
         List {
@@ -53,12 +54,15 @@ struct SummaryView: View {
                 }
                 ForEach(trip.sortedReservations) { reservation in
                     ReservationRow(reservation: reservation) { placeToOpen = MapPlace(reservation) }
+                        .contentShape(Rectangle())
+                        .onTapGesture { editingReservation = reservation }
+                        .accessibilityAction(named: "Edit") { editingReservation = reservation }
                 }
                 .onDelete { offsets in
                     let items = trip.sortedReservations
                     for index in offsets { context.delete(items[index]) }
                 }
-                Button(action: onImport) { Label("Add reservation from email", systemImage: "envelope.open") }
+                Button(action: onImport) { Label("Add reservation", systemImage: "envelope.open") }
             } header: {
                 Text("Reservations")
             }
@@ -89,6 +93,15 @@ struct SummaryView: View {
         }
         .listStyle(.insetGrouped)
         .openInMapsDialog(place: $placeToOpen)
+        .sheet(item: $editingReservation) { ReservationEditorView(reservation: $0) }
+        #if DEBUG
+        .onAppear {
+            let items = trip.sortedReservations
+            if DemoData.openPage == -1, let n = DemoData.openEditor, items.indices.contains(n - 1) {
+                editingReservation = items[n - 1]
+            }
+        }
+        #endif
     }
 
     private var allPlaces: [MapPlace] {

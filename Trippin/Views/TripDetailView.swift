@@ -44,7 +44,8 @@ struct TripDetailView: View {
         .sheet(isPresented: $showingImport) { ImportEmailView(trip: trip, initialText: "") }
         .sheet(isPresented: $showingRecommendations) { RecommendationsView(trip: trip) }
         .sheet(isPresented: $showingEditor) { TripEditorView(trip: trip) }
-        .task(id: trip.stops.count) {
+        // Re-runs when stops are added or one moves to a new place.
+        .task(id: trip.stops.filter { !$0.localLookupDone }.count) {
             await LocalNames.fill(trip, context: context)
         }
         .onChange(of: trip.dayCount) { _, count in

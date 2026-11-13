@@ -12,6 +12,7 @@ struct DayView: View {
     @State private var routes: [MKRoute] = []
     @State private var transport: Transport = .walking
     @State private var optimizeMessage: String?
+    @State private var editing: EditTarget?
 
     enum Transport: String, CaseIterable, Identifiable {
         case walking = "Walk", driving = "Drive"
@@ -50,6 +51,9 @@ struct DayView: View {
                         StopRow(stop: stop, number: index + 1) {
                             placeToOpen = MapPlace(stop: stop, number: index + 1)
                         }
+                        .contentShape(Rectangle())
+                        .onTapGesture { editing = .stop(stop) }
+                        .accessibilityAction(named: "Edit") { editing = .stop(stop) }
                         if index < routes.count, index + 1 < stops.count, let leg = legText(index) {
                             Label(leg, systemImage: transport == .walking ? "figure.walk" : "car")
                                 .font(.caption)
@@ -85,7 +89,22 @@ struct DayView: View {
         .sheet(isPresented: $showingSearch) {
             PlaceSearchView(trip: trip, day: day)
         }
+        .sheet(item: $editing) { target in
+            switch target {
+            case .stop(let stop):
+                StopEditorView(stop: stop, trip: trip) { editing = .reservation($0) }
+            case .reservation(let reservation):
+                ReservationEditorView(reservation: reservation)
+            }
+        }
         .task(id: routeKey) { await loadRoutes() }
+        #if DEBUG
+        .onAppear {
+            if DemoData.openPage == day, let n = DemoData.openEditor, stops.indices.contains(n - 1) {
+                editing = .stop(stops[n - 1])
+            }
+        }
+        #endif
     }
 
     private var numberedPlaces: [MapPlace] {
@@ -160,6 +179,18 @@ struct DayView: View {
         optimizeMessage = saved > 50
             ? "Saved about \(distance(saved)) of travel."
             : "This order is already about as short as it gets."
+    }
+}
+
+/// What the edit sheet is showing. Switching from a stop to its booking swaps the sheet.
+enum EditTarget: Identifiable {
+    case stop(Stop), reservation(Reservation)
+
+    var id: UUID {
+        switch self {
+        case .stop(let stop): stop.id
+        case .reservation(let reservation): reservation.id
+        }
     }
 }
 

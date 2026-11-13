@@ -65,23 +65,19 @@ struct ImportEmailView: View {
                     if let note { Text(note) }
                 }
 
+                if drafts.isEmpty {
+                    Section {
+                        Button { drafts.append(ParsedReservation(start: suggestedStart)) } label: {
+                            Label("Enter details yourself", systemImage: "square.and.pencil")
+                        }
+                    } footer: {
+                        Text("No email? Type in a booking from a website, an app or a paper ticket.")
+                    }
+                }
+
                 ForEach($drafts) { $draft in
                     Section {
-                        Picker("Type", selection: $draft.kind) {
-                            ForEach(ReservationKind.allCases) { Label($0.label, systemImage: $0.symbol).tag($0) }
-                        }
-                        TextField("Title", text: $draft.title)
-                        TextField("Local name (e.g. パーク ハイアット 東京)", text: Binding(
-                            get: { draft.localName ?? "" },
-                            set: { draft.localName = $0.isEmpty ? nil : $0 }))
-                        TextField("Confirmation code", text: Binding(
-                            get: { draft.confirmationCode ?? "" },
-                            set: { draft.confirmationCode = $0.isEmpty ? nil : $0 }))
-                        OptionalDatePicker(title: startLabel(draft.kind), date: $draft.start)
-                        OptionalDatePicker(title: endLabel(draft.kind), date: $draft.end)
-                        TextField("Address or place", text: Binding(
-                            get: { draft.address ?? "" },
-                            set: { draft.address = $0.isEmpty ? nil : $0 }), axis: .vertical)
+                        ReservationFields(draft: $draft)
                         Button("Remove", role: .destructive) { drafts.removeAll { $0.id == draft.id } }
                     } header: {
                         Text(draft.kind.label)
@@ -157,39 +153,9 @@ struct ImportEmailView: View {
         dismiss()
     }
 
-    private func startLabel(_ kind: ReservationKind) -> String {
-        switch kind {
-        case .hotel: "Check in"
-        case .flight, .train: "Departs"
-        case .car: "Pick up"
-        default: "Starts"
-        }
-    }
-
-    private func endLabel(_ kind: ReservationKind) -> String {
-        switch kind {
-        case .hotel: "Check out"
-        case .flight, .train: "Arrives"
-        case .car: "Drop off"
-        default: "Ends"
-        }
-    }
-}
-
-private struct OptionalDatePicker: View {
-    let title: String
-    @Binding var date: Date?
-
-    var body: some View {
-        if let value = date {
-            HStack {
-                DatePicker(title, selection: Binding(get: { value }, set: { date = $0 }))
-                Button { date = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Clear \(title)")
-            }
-        } else {
-            Button("Add \(title.lowercased()) time") { date = .now }
-        }
+    /// Noon on the trip's first day, so a typed-in booking lands on the trip.
+    private var suggestedStart: Date? {
+        guard let start = targetTrip?.startDate else { return nil }
+        return Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: start)
     }
 }

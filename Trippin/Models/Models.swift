@@ -95,6 +95,12 @@ final class Reservation {
         guard let latitude, let longitude else { return nil }
         return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
+
+    /// The editable fields, for the reservation editor.
+    var fields: ParsedReservation {
+        ParsedReservation(kind: kind, title: title, confirmationCode: confirmationCode,
+                          start: start, end: end, address: address, localName: localName)
+    }
 }
 
 /// One place on a day's itinerary. Reservations create stops automatically;
