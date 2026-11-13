@@ -34,7 +34,7 @@ struct TripDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button { showingImport = true } label: { Label("Import from E-mail", systemImage: "envelope.open") }
+                    Button { showingImport = true } label: { Label("Add reservation", systemImage: "envelope.open") }
                     Button { showingPastePlaces = true } label: { Label("Paste itinerary", systemImage: "list.bullet.clipboard") }
                     Button { showingExport = true } label: { Label("Export itinerary", systemImage: "square.and.arrow.up") }
                     Button { showingRecommendations = true } label: { Label("Recommendations", systemImage: "sparkles") }
