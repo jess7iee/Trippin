@@ -11,6 +11,7 @@ struct TripDetailView: View {
     @State private var showingRecommendations = false
     @State private var showingEditor = false
     @State private var showingPastePlaces = false
+    @State private var showingExport = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,6 +37,7 @@ struct TripDetailView: View {
                     Button { showingImport = true } label: { Label("Add reservation from email", systemImage: "envelope.open") }
                     Button { showingRecommendations = true } label: { Label("Get recommendations", systemImage: "sparkles") }
                     Button { showingPastePlaces = true } label: { Label("Paste places list", systemImage: "list.bullet.clipboard") }
+                    Button { showingExport = true } label: { Label("Export as web page", systemImage: "square.and.arrow.up") }
                     Button { showingEditor = true } label: { Label("Edit trip", systemImage: "pencil") }
                 } label: {
                     Image(systemName: "plus.circle")
@@ -47,6 +49,7 @@ struct TripDetailView: View {
         .sheet(isPresented: $showingRecommendations) { RecommendationsView(trip: trip) }
         .sheet(isPresented: $showingEditor) { TripEditorView(trip: trip) }
         .sheet(isPresented: $showingPastePlaces) { PastePlacesView(trip: trip) }
+        .sheet(isPresented: $showingExport) { ExportTripView(trip: trip) }
         // Re-runs when stops are added or one moves to a new place.
         .task {
             await TripPlanner.repairLocations(trip, context: context)

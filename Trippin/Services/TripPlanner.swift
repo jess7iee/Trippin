@@ -98,10 +98,22 @@ enum TripPlanner {
             ? [parsed.address ?? ""]
             : [parsed.title, parsed.localName ?? "", parsed.address ?? ""]
         let region = await PlaceSearch.region(for: trip.destination)
-        return await PlaceSearch.best(queries, near: region)
+        guard let place = await PlaceSearch.best(queries, near: region) else { return nil }
+        // A booking with a mainland Chinese address must land in China; outside China,
+        // Apple Maps often returns a look-alike elsewhere (e.g. in Japan).
+        if let address = parsed.address, TripExport.chineseCity(fromAddress: address) != nil,
+           await countryCode(of: place.coordinate) != "CN" {
+            return nil
+        }
+        return place
     }
 
-    static let currentLocationVersion = 1
+    private static func countryCode(of coordinate: CLLocationCoordinate2D) async -> String? {
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return try? await CLGeocoder().reverseGeocodeLocation(location).first?.isoCountryCode
+    }
+
+    static let currentLocationVersion = 3
 
     /// Looks up bookings saved before locations were checked for relevance, and
     /// moves any that had landed somewhere unrelated (e.g. a Kunming hotel placed in Tokyo).
@@ -110,7 +122,13 @@ enum TripPlanner {
         guard !stale.isEmpty else { return }
         for reservation in stale {
             defer { reservation.locationVersion = currentLocationVersion }
-            guard let place = await locate(reservation.fields, in: trip) else { continue }
+            guard let place = await locate(reservation.fields, in: trip) else {
+                // Not found now, but it may still sit where an old bug put it: a Chinese
+                // address pinned outside mainland China (e.g. a Lijiang hotel in Japan).
+                // Clear it so the place is estimated again or can be set by hand.
+                if Self.landedInWrongCountry(reservation) { clearLocation(of: reservation) }
+                continue
+            }
             let old = reservation.coordinate.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
             let new = CLLocation(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
             guard old == nil || old!.distance(from: new) > 30_000 else { continue }
@@ -158,6 +176,25 @@ enum TripPlanner {
             setLocation(of: reservation, to: place.coordinate, approximate: approximate)
         }
         try? context.save()
+    }
+
+    private static func landedInWrongCountry(_ reservation: Reservation) -> Bool {
+        guard let address = reservation.address, EmailParser.isLocalScript(address),
+              TripExport.chineseCity(fromAddress: address) != nil else { return false }
+        let countries = Set(reservation.stops.compactMap(\.countryCode))
+        return !countries.isEmpty && !countries.contains("CN")
+    }
+
+    private static func clearLocation(of reservation: Reservation) {
+        reservation.latitude = nil
+        reservation.longitude = nil
+        for stop in reservation.stops {
+            stop.coordinate = nil
+            stop.localAddress = nil
+            stop.countryCode = nil
+            stop.approximateLocation = false
+            stop.localLookupDone = false
+        }
     }
 
     /// Moves a booking and its stops to a new point and refreshes their local details.
