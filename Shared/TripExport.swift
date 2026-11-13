@@ -176,7 +176,10 @@ enum TripExport {
                 out += "<div class=\"stay\"><span class=\"label\">Staying at</span><span class=\"name\">\(esc(stay.name))"
                 if let local = stay.localName, local != stay.name { out += " <span class=\"zh\">\(esc(local))</span>" }
                 out += "</span>"
-                let addresses = [stay.address, stay.localAddress.flatMap { $0 == stay.address ? nil : $0 }].compactMap { $0 }
+                // Skip a local address that's only part of the main one (e.g. just "云南").
+                let addresses = [stay.address, stay.localAddress.flatMap { local in
+                    (stay.address?.contains(local) ?? false) ? nil : local
+                }].compactMap { $0 }
                 if !addresses.isEmpty { out += "<span class=\"addr\">\(addresses.map(esc).joined(separator: " · "))</span>" }
                 if let code = stay.confirmation { out += "<span class=\"addr\">Booking <span class=\"mono\">\(esc(code))</span></span>" }
                 out += "</div>\n"

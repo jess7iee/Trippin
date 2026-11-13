@@ -19,6 +19,23 @@ struct ExportTripView: View {
     @State private var exported: URL?
     @State private var previewing = false
     @State private var loaded = false
+    @State private var format: Format = .pdf
+    @State private var rendering = false
+    @State private var exportError: String?
+
+    enum Format: String, CaseIterable, Identifiable {
+        case pdf = "PDF", image = "Image", web = "Web page"
+        var id: String { rawValue }
+        var fileExtension: String { switch self { case .pdf: "pdf"; case .image: "png"; case .web: "html" } }
+        var shareLabel: String { switch self { case .pdf: "Share PDF"; case .image: "Share image"; case .web: "Share web page" } }
+        var footer: String {
+            switch self {
+            case .pdf: "One long PDF page. Opens right away in WeChat, Messages, Mail and Files, and can be zoomed."
+            case .image: "One long picture. Shows straight in a chat and can be saved to Photos; text can't be copied."
+            case .web: "One .html file. Some chat apps need it saved to Files first, then opened in a browser."
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -65,16 +82,26 @@ struct ExportTripView: View {
                 }
 
                 Section {
-                    Button { export(); previewing = true } label: { Label("Preview", systemImage: "eye") }
-                        .disabled(included.isEmpty)
-                    if let exported {
-                        ShareLink(item: exported) { Label("Share web page", systemImage: "square.and.arrow.up") }
+                    Picker("Format", selection: $format) {
+                        ForEach(Format.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Button { Task { await export(); if exported != nil { previewing = true } } } label: {
+                        Label("Preview", systemImage: "eye")
+                    }
+                    .disabled(included.isEmpty || rendering)
+                    if rendering {
+                        HStack { ProgressView(); Text("Making the \(format == .image ? "image" : format == .pdf ? "PDF" : "page")…").foregroundStyle(.secondary) }
+                    } else if let exported {
+                        ShareLink(item: exported) { Label(format.shareLabel, systemImage: "square.and.arrow.up") }
                     } else {
-                        Button { export() } label: { Label("Create web page", systemImage: "doc.richtext") }
+                        Button { Task { await export() } } label: { Label(format == .pdf ? "Create PDF" : format == .image ? "Create image" : "Create web page", systemImage: "doc.richtext") }
                             .disabled(included.isEmpty)
                     }
+                } header: {
+                    Text("Share as")
                 } footer: {
-                    Text("Creates one .html file that opens in any browser. Send it with Messages, AirDrop or email, or save it to Files.")
+                    if let exportError { Text(exportError).foregroundStyle(.red) } else { Text(format.footer) }
                 }
             }
             .navigationTitle("Export trip")
@@ -89,6 +116,7 @@ struct ExportTripView: View {
             .onChange(of: included) { _, _ in if !titleEdited { title = defaultTitle } }
             .onChange(of: includeTravel) { _, _ in exported = nil }
             .onChange(of: includeBookingCodes) { _, _ in exported = nil }
+            .onChange(of: format) { _, _ in exported = nil; exportError = nil }
         }
     }
 
@@ -119,7 +147,7 @@ struct ExportTripView: View {
         return picked.map(\.name).joined(separator: " & ")
     }
 
-    private func export() {
+    private func export() async {
         let picked = chosen
         guard let first = picked.first?.days.first?.date, let last = picked.last?.days.last?.date else { return }
         var options = TripExport.Options(title: title.isEmpty ? trip.name : title, subtitle: TripExportBuilder.dateRange(first, last))
@@ -128,12 +156,20 @@ struct ExportTripView: View {
         }
         let html = TripExport.html(sections: picked, options: options)
         let safeName = options.title.components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>")).joined()
-        let url = FileManager.default.temporaryDirectory.appending(path: "\(safeName).html")
+        let url = FileManager.default.temporaryDirectory.appending(path: "\(safeName).\(format.fileExtension)")
+        exportError = nil
+        rendering = true
+        defer { rendering = false }
         do {
-            try html.write(to: url, atomically: true, encoding: .utf8)
+            switch format {
+            case .web: try html.write(to: url, atomically: true, encoding: .utf8)
+            case .pdf: try await PageRenderer().pdf(html: html).write(to: url)
+            case .image: try await PageRenderer().image(html: html).write(to: url)
+            }
             exported = url
         } catch {
             exported = nil
+            exportError = error.localizedDescription
         }
     }
 
