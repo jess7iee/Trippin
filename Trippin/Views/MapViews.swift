@@ -176,6 +176,51 @@ struct TripMapView: View {
 
 // MARK: - Open in Apple Maps / Google Maps / Amap
 
+extension MapPlace {
+    /// The maps app searches for the place by name (e.g. "Fairfield by Marriott
+    /// Kunming Xishan", not "Check in: …" or the street address). Amap gets the
+    /// local-language name, which it searches best.
+    func searchText(for app: MapsApp) -> String {
+        if app == .amap, let local = localName, !local.isEmpty { return local }
+        return searchName.isEmpty ? (address ?? name) : searchName
+    }
+
+    var hasLocalCard: Bool { localName != nil || localAddress != nil }
+}
+
+/// A button that opens a small menu right beside it: Open in Apple Maps,
+/// Google Maps or Amap, and the local-language card.
+struct OpenInMapsButton<Label: View>: View {
+    let place: MapPlace
+    @ViewBuilder var label: () -> Label
+    @State private var card: MapPlace?
+
+    var body: some View {
+        Menu {
+            Section(menuTitle) {
+                ForEach(MapsApp.allCases) { app in
+                    Button("Open in \(app.name)", systemImage: "map") {
+                        app.open(text: place.searchText(for: app), coordinate: place.coordinate)
+                    }
+                }
+            }
+            if place.hasLocalCard {
+                Button("Show in local language", systemImage: "character.bubble") { card = place }
+            }
+        } label: {
+            label()
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("Open \(place.name) in maps")
+        .sheet(item: $card) { LocalNameCard(place: $0) }
+    }
+
+    private var menuTitle: String {
+        [place.searchName, place.localName].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+/// Used for pins on a map: the same choices, shown when `place` is set.
 private struct OpenInMapsDialog: ViewModifier {
     @Binding var place: MapPlace?
     @State private var card: MapPlace?
@@ -187,10 +232,10 @@ private struct OpenInMapsDialog: ViewModifier {
         ), titleVisibility: .visible, presenting: place) { place in
             ForEach(MapsApp.allCases) { app in
                 Button("Open in \(app.name)") {
-                    app.open(text: searchText(place, for: app), coordinate: place.coordinate)
+                    app.open(text: place.searchText(for: app), coordinate: place.coordinate)
                 }
             }
-            if place.localName != nil || place.localAddress != nil {
+            if place.hasLocalCard {
                 Button("Show in local language") { card = place }
             }
             Button("Cancel", role: .cancel) {}
@@ -203,18 +248,6 @@ private struct OpenInMapsDialog: ViewModifier {
         }
         .sheet(item: $card) { LocalNameCard(place: $0) }
     }
-
-    /// The maps app searches for the place by name (e.g. "Fairfield by Marriott
-    /// Kunming Xishan", not "Check in: …" or the street address). Amap gets the
-    /// local-language name, which it searches best.
-    private func searchText(_ place: MapPlace, for app: MapsApp) -> String {
-        if app == .amap, let local = place.localName?.nonEmpty { return local }
-        return place.searchName.nonEmpty ?? place.address ?? place.name
-    }
-}
-
-private extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
 }
 
 /// Big, clear local name and address to show a taxi driver, station staff or a host.
@@ -266,6 +299,7 @@ struct LocalNameCard: View {
 
 extension View {
     /// Shows the Apple Maps / Google Maps / Amap picker when `place` is set.
+    /// Attach it to the map whose pins set `place`, so it appears there.
     func openInMapsDialog(place: Binding<MapPlace?>) -> some View {
         modifier(OpenInMapsDialog(place: place))
     }

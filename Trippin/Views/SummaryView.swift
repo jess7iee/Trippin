@@ -22,6 +22,7 @@ struct SummaryView: View {
                 TripMapView(places: allPlaces, showRoute: false,
                             flights: trip.reservations.compactMap(FlightPath.init), selection: $placeToOpen)
                     .frame(height: 260)
+                    .openInMapsDialog(place: $placeToOpen)
                     .listRowInsets(EdgeInsets())
                 HStack {
                     stat("\(trip.dayCount)", "days")
@@ -40,7 +41,7 @@ struct SummaryView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(trip.sortedReservations) { reservation in
-                        ReservationRow(reservation: reservation) { placeToOpen = MapPlace(reservation) }
+                        ReservationRow(reservation: reservation)
                             .contentShape(Rectangle())
                             .onTapGesture { editingReservation = reservation }
                             .accessibilityAction(named: "Edit") { editingReservation = reservation }
@@ -107,7 +108,6 @@ struct SummaryView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .openInMapsDialog(place: $placeToOpen)
         .sheet(item: $editingReservation) { ReservationEditorView(reservation: $0) }
         #if DEBUG
         .onAppear {
@@ -193,7 +193,6 @@ private struct TodoRow: View {
 
 struct ReservationRow: View {
     let reservation: Reservation
-    var onOpenMap: () -> Void
 
     var body: some View {
         if let flight = FlightInfo(reservation) {
@@ -219,9 +218,8 @@ struct ReservationRow: View {
                 }
             }
             if reservation.coordinate != nil {
-                Button(action: onOpenMap) { Image(systemName: "map") }
+                OpenInMapsButton(place: MapPlace(reservation)) { Image(systemName: "map") }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("Open in maps")
             }
         }
     }
@@ -247,9 +245,8 @@ struct ReservationRow: View {
             }
             Spacer()
             if reservation.coordinate != nil || reservation.address != nil {
-                Button(action: onOpenMap) { Image(systemName: "map") }
+                OpenInMapsButton(place: MapPlace(reservation)) { Image(systemName: "map") }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("Open in maps")
             }
         }
     }

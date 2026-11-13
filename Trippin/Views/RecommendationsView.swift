@@ -14,7 +14,6 @@ struct RecommendationsView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var showingSettings = false
-    @State private var placeToOpen: MapPlace?
 
     struct Suggestion: Identifiable {
         var id: String { rec.id }
@@ -56,7 +55,7 @@ struct RecommendationsView: View {
                 ForEach(groupedDays, id: \.self) { day in
                     Section("Day \(day + 1) · \(trip.date(forDay: day).formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))") {
                         ForEach($results) { $s in
-                            if s.day == day { SuggestionRow(suggestion: $s, dayCount: trip.dayCount) { placeToOpen = $0 } }
+                            if s.day == day { SuggestionRow(suggestion: $s, dayCount: trip.dayCount) }
                         }
                     }
                 }
@@ -71,7 +70,6 @@ struct RecommendationsView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
-            .openInMapsDialog(place: $placeToOpen)
         }
     }
 
@@ -146,7 +144,6 @@ struct RecommendationsView: View {
 private struct SuggestionRow: View {
     @Binding var suggestion: RecommendationsView.Suggestion
     let dayCount: Int
-    var onMap: (MapPlace) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -177,9 +174,8 @@ private struct SuggestionRow: View {
                 }
                 Spacer()
                 if let place = suggestion.place {
-                    Button { onMap(MapPlace(place)) } label: { Image(systemName: "map") }
+                    OpenInMapsButton(place: MapPlace(place)) { Image(systemName: "map") }
                         .buttonStyle(.borderless)
-                        .accessibilityLabel("Open in maps")
                 }
             }
             Picker("Day", selection: $suggestion.day) {

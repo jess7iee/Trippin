@@ -27,6 +27,7 @@ struct DayView: View {
             Section {
                 TripMapView(places: numberedPlaces, showRoute: true, routes: routes, flights: flights, selection: $placeToOpen)
                     .frame(height: 280)
+                    .openInMapsDialog(place: $placeToOpen)
                     .listRowInsets(EdgeInsets())
                 HStack {
                     Picker("Travel", selection: $transport) {
@@ -48,9 +49,7 @@ struct DayView: View {
                 }
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
                     VStack(alignment: .leading, spacing: 6) {
-                        StopRow(stop: stop, number: index + 1) {
-                            placeToOpen = MapPlace(stop: stop, number: index + 1)
-                        }
+                        StopRow(stop: stop, number: index + 1)
                         .contentShape(Rectangle())
                         .onTapGesture { editing = .stop(stop) }
                         .accessibilityAction(named: "Edit") { editing = .stop(stop) }
@@ -85,7 +84,6 @@ struct DayView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .openInMapsDialog(place: $placeToOpen)
         .sheet(isPresented: $showingSearch) {
             PlaceSearchView(trip: trip, day: day)
         }
@@ -204,7 +202,6 @@ enum EditTarget: Identifiable {
 private struct StopRow: View {
     let stop: Stop
     let number: Int
-    var onOpenMap: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -245,9 +242,10 @@ private struct StopRow: View {
                 }
             }
             Spacer()
-            Button(action: onOpenMap) { Image(systemName: "arrow.triangle.turn.up.right.diamond") }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Open in maps")
+            OpenInMapsButton(place: MapPlace(stop: stop, number: number)) {
+                Image(systemName: "arrow.triangle.turn.up.right.diamond")
+            }
+            .buttonStyle(.borderless)
         }
     }
 }
