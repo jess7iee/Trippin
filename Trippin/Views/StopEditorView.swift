@@ -20,6 +20,17 @@ struct StopEditorView: View {
     @State private var time: Date?
     @State private var newPlace: PlaceSearch.Place?
 
+    init(stop: Stop, trip: Trip, onEditReservation: @escaping (Reservation) -> Void) {
+        self.stop = stop
+        self.trip = trip
+        self.onEditReservation = onEditReservation
+        // Seeded once here; onAppear can fire again (e.g. after a menu closes) and would undo edits.
+        _name = State(initialValue: stop.name)
+        _note = State(initialValue: stop.note)
+        _day = State(initialValue: stop.dayIndex)
+        _time = State(initialValue: stop.fixedTime)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -101,12 +112,6 @@ struct StopEditorView: View {
                     Button("Save", action: save)
                         .disabled(stop.reservation == nil && name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-            }
-            .onAppear {
-                name = stop.name
-                note = stop.note
-                day = stop.dayIndex
-                time = stop.fixedTime
             }
         }
     }

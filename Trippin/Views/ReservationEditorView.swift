@@ -53,9 +53,14 @@ struct ReservationEditorView: View {
     @Environment(\.dismiss) private var dismiss
     let reservation: Reservation
 
-    @State private var draft = ParsedReservation()
+    @State private var draft: ParsedReservation
     @State private var saving = false
     @State private var confirmingDelete = false
+
+    init(reservation: Reservation) {
+        self.reservation = reservation
+        _draft = State(initialValue: reservation.fields)
+    }
 
     var body: some View {
         NavigationStack {
@@ -104,7 +109,6 @@ struct ReservationEditorView: View {
                     dismiss()
                 }
             }
-            .onAppear { draft = reservation.fields }
         }
     }
 
