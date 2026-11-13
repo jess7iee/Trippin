@@ -139,7 +139,11 @@ extension ClaudeClient {
         let system = """
         You read travel confirmation emails and extract each booking: flights (one entry per flight leg), \
         hotels (start = check-in, end = check-out), restaurants, car rentals, trains and activities. \
-        Use the local times written in the email. Return an empty list if the email has no booking.
+        Use the local times written in the email. The text may be a whole itinerary with many bookings; \
+        return each one. Skip notes about things not yet booked. If a date has no year, use the next \
+        occurrence on or after \(Self.today) (a date more than three months before that is next year's). \
+        If a hotel stay has dates but no times, use 15:00 for check-in and 11:00 for check-out. \
+        Return an empty list if the text has no booking.
         """
         let result = try await structured(ExtractionResult.self, system: system,
                                           prompt: "<email>\n\(email)\n</email>", schema: schema, effort: "low")
@@ -154,6 +158,11 @@ extension ClaudeClient {
                 localName: item.localName.isEmpty ? nil : item.localName
             )
         }
+    }
+
+    /// Today's date, so Claude can fill in a missing year.
+    private static var today: String {
+        Date.now.formatted(.iso8601.year().month().day())
     }
 
     static func parseLocalDate(_ string: String) -> Date? {

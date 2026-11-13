@@ -38,7 +38,8 @@ struct ImportEmailView: View {
 
                 Section {
                     TextEditor(text: $text)
-                        .frame(minHeight: drafts.isEmpty ? 220 : 100)
+                        // Fixed height so a long itinerary scrolls inside the box and the buttons stay in view.
+                        .frame(height: drafts.isEmpty ? 220 : 100)
                         .font(.callout)
                         .overlay(alignment: .topLeading) {
                             if text.isEmpty {
@@ -49,9 +50,14 @@ struct ImportEmailView: View {
                             }
                         }
                     HStack {
-                        Button { if let s = UIPasteboard.general.string { text = s } } label: {
-                            Label("Paste", systemImage: "doc.on.clipboard")
+                        // The system paste button works without the "Allow Paste" prompt,
+                        // which a plain button reading UIPasteboard can trigger or be blocked by.
+                        PasteButton(payloadType: String.self) { strings in
+                            guard let pasted = strings.first else { return }
+                            Task { @MainActor in text = pasted }
                         }
+                        .labelStyle(.titleAndIcon)
+                        .buttonBorderShape(.capsule)
                         Spacer()
                         Button { Task { await parse() } } label: {
                             if parsing { ProgressView() } else { Label("Find reservations", systemImage: "wand.and.stars") }
@@ -130,15 +136,17 @@ struct ImportEmailView: View {
                 note = "\(error.localizedDescription) Used the on-device reader instead."
             }
         }
-        let local = EmailParser.parse(text)
-        drafts = [local]
+        let local = EmailParser.parseAll(text)
+        drafts = local
         if note == nil {
+            let found = local.count > 1 ? "Found \(local.count) bookings on this device. " : "Read on this device. "
             note = KeychainStore.hasAPIKey
-                ? "Check the details before saving."
-                : "Read on this device. Add a Claude API key in Settings for better results with multi-flight emails."
+                ? found + "Check the details before saving."
+                : found + "Check the details before saving, or add a Claude API key in Settings for better results."
         }
         // When the email came from the share sheet, prefer the trip that covers the booking date.
-        if trip == nil, let start = local.start, let match = trips.first(where: { $0.dayIndex(for: start) != nil }) {
+        if trip == nil, let start = local.compactMap(\.start).first,
+           let match = trips.first(where: { $0.dayIndex(for: start) != nil }) {
             selectedTripID = match.id
         }
     }
