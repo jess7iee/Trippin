@@ -25,7 +25,7 @@ struct DayView: View {
     var body: some View {
         List {
             Section {
-                TripMapView(places: numberedPlaces, showRoute: true, routes: routes, selection: $placeToOpen)
+                TripMapView(places: numberedPlaces, showRoute: true, routes: routes, flights: flights, selection: $placeToOpen)
                     .frame(height: 280)
                     .listRowInsets(EdgeInsets())
                 HStack {
@@ -107,6 +107,11 @@ struct DayView: View {
         #endif
     }
 
+    private var flights: [FlightPath] {
+        var seen = Set<UUID>()
+        return stops.compactMap(\.reservation).filter { seen.insert($0.id).inserted }.compactMap(FlightPath.init)
+    }
+
     private var numberedPlaces: [MapPlace] {
         stops.enumerated().map { MapPlace(stop: $1, number: $0 + 1) }.filter { $0.coordinate != nil }
     }
@@ -115,14 +120,16 @@ struct DayView: View {
 
     /// Changes whenever the order, locations or travel mode change.
     private var routeKey: String {
-        stops.map { "\($0.id)\($0.latitude ?? 0)\($0.longitude ?? 0)" }.joined() + transport.rawValue
+        stops.map { "\($0.id)\($0.latitude ?? 0)\($0.longitude ?? 0)\($0.arrivalCoordinate?.latitude ?? 0)" }.joined() + transport.rawValue
     }
 
     private func loadRoutes() async {
-        let located = stops.compactMap(\.coordinate)
+        // After a flight or train, the next leg starts where it arrives.
+        let located = stops.compactMap { stop in stop.coordinate.map { (start: $0, end: stop.arrivalCoordinate ?? $0) } }
         guard located.count > 1 else { routes = []; return }
         var result: [MKRoute] = []
-        for (a, b) in zip(located, located.dropFirst()) {
+        for (from, next) in zip(located, located.dropFirst()) {
+            let (a, b) = (from.end, next.start)
             let request = MKDirections.Request()
             request.source = MKMapItem(placemark: MKPlacemark(coordinate: a))
             request.destination = MKMapItem(placemark: MKPlacemark(coordinate: b))
@@ -207,20 +214,25 @@ private struct StopRow: View {
                 .background(DayColor.color(stop.dayIndex), in: Circle())
                 .foregroundStyle(.white)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Image(systemName: stop.symbol).foregroundStyle(.secondary).font(.caption)
-                    Text(stop.name).font(.body.weight(.medium))
-                }
-                if let local = stop.distinctLocalName {
-                    Text(local)
-                        .font(.subheadline)
-                        .textSelection(.enabled)
-                        .accessibilityLabel("Local name: \(local)")
-                }
-                if let time = stop.fixedTime {
-                    Text(time.formatted(date: .omitted, time: .shortened))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                if let flight = FlightInfo(stop.reservation) {
+                    FlightCard(info: flight, tint: DayColor.color(stop.dayIndex))
+                        .padding(.trailing, 4)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: stop.symbol).foregroundStyle(.secondary).font(.caption)
+                        Text(stop.name).font(.body.weight(.medium))
+                    }
+                    if let local = stop.distinctLocalName {
+                        Text(local)
+                            .font(.subheadline)
+                            .textSelection(.enabled)
+                            .accessibilityLabel("Local name: \(local)")
+                    }
+                    if let time = stop.fixedTime {
+                        Text(time.formatted(date: .omitted, time: .shortened))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
                 }
                 if !stop.note.isEmpty {
                     Text(stop.note).font(.subheadline).foregroundStyle(.secondary)

@@ -31,6 +31,7 @@ enum EmailParser {
         result.start = start
         if let end, let start, end > start { result.end = end }
         result.address = departurePlace(in: text, kind: result.kind) ?? address(in: text)
+        result.arrivalPlace = arrivalPlace(in: text, kind: result.kind)
         (result.title, result.localName) = titleAndLocalName(in: text, kind: result.kind)
         return result
     }
@@ -220,6 +221,15 @@ enum EmailParser {
         switch kind {
         case .flight: flightRoute(in: text).map { "\(airportName($0.from, in: text) ?? $0.from) Airport" }
         case .train: headingRoute(in: text).map { "\($0.from) Railway Station" }
+        default: nil
+        }
+    }
+
+    /// Where a flight or train arrives, as something Apple Maps can find.
+    private static func arrivalPlace(in text: String, kind: ReservationKind) -> String? {
+        switch kind {
+        case .flight: flightRoute(in: text).map { "\(airportName($0.to, in: text) ?? $0.to) Airport" }
+        case .train: headingRoute(in: text).map { "\($0.to) Railway Station" }
         default: nil
         }
     }

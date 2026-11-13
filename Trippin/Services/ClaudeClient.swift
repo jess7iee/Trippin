@@ -108,6 +108,7 @@ extension ClaudeClient {
             var start: String
             var end: String
             var location: String
+            var arrivalLocation: String
             var localName: String
         }
         var reservations: [Item]
@@ -125,9 +126,10 @@ extension ClaudeClient {
                 "start": ["type": "string", "description": "Local start time as yyyy-MM-dd'T'HH:mm, or yyyy-MM-dd if no time. Empty if unknown."],
                 "end": ["type": "string", "description": "Local end time in the same format, or empty"],
                 "location": ["type": "string", "description": "Street address, or venue name and city, to find it on a map. For flights, the departure airport name."],
+                "arrivalLocation": ["type": "string", "description": "For flights and trains: the arrival airport or station name, to find it on a map, e.g. 'Beijing Capital Airport'. Empty otherwise."],
                 "localName": ["type": "string", "description": "The hotel, restaurant, station or venue name as written in the local language and script, if the email shows it or you know it for certain; otherwise empty"],
             ],
-            "required": ["kind", "title", "confirmationCode", "start", "end", "location", "localName"],
+            "required": ["kind", "title", "confirmationCode", "start", "end", "location", "arrivalLocation", "localName"],
             "additionalProperties": false,
         ]
         let schema: [String: Any] = [
@@ -155,7 +157,8 @@ extension ClaudeClient {
                 start: Self.parseLocalDate(item.start),
                 end: Self.parseLocalDate(item.end),
                 address: item.location.isEmpty ? nil : item.location,
-                localName: item.localName.isEmpty ? nil : item.localName
+                localName: item.localName.isEmpty ? nil : item.localName,
+                arrivalPlace: item.arrivalLocation.isEmpty ? nil : item.arrivalLocation
             )
         }
     }

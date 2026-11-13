@@ -71,6 +71,10 @@ final class Reservation {
     var rawText: String = ""
     /// Name as written locally, e.g. パーク ハイアット 東京.
     var localName: String?
+    /// For flights and trains: where it arrives.
+    var arrivalAddress: String?
+    var arrivalLatitude: Double?
+    var arrivalLongitude: Double?
     var trip: Trip?
 
     @Relationship(deleteRule: .cascade, inverse: \Stop.reservation) var stops: [Stop] = []
@@ -83,6 +87,7 @@ final class Reservation {
         self.end = parsed.end
         self.address = parsed.address
         self.localName = parsed.localName
+        self.arrivalAddress = parsed.arrivalPlace
         self.rawText = rawText
     }
 
@@ -96,10 +101,22 @@ final class Reservation {
         return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
+    var arrivalCoordinate: CLLocationCoordinate2D? {
+        get {
+            guard let arrivalLatitude, let arrivalLongitude else { return nil }
+            return CLLocationCoordinate2D(latitude: arrivalLatitude, longitude: arrivalLongitude)
+        }
+        set {
+            arrivalLatitude = newValue?.latitude
+            arrivalLongitude = newValue?.longitude
+        }
+    }
+
     /// The editable fields, for the reservation editor.
     var fields: ParsedReservation {
         ParsedReservation(kind: kind, title: title, confirmationCode: confirmationCode,
-                          start: start, end: end, address: address, localName: localName)
+                          start: start, end: end, address: address, localName: localName,
+                          arrivalPlace: arrivalAddress)
     }
 }
 
@@ -146,6 +163,12 @@ final class Stop {
         self.fixedTime = fixedTime
         self.note = note
         self.symbol = symbol
+    }
+
+    /// For a flight or train stop: where it arrives, so the day's route continues from there.
+    var arrivalCoordinate: CLLocationCoordinate2D? {
+        guard reservation?.kind.isJourney == true else { return nil }
+        return reservation?.arrivalCoordinate
     }
 
     var coordinate: CLLocationCoordinate2D? {

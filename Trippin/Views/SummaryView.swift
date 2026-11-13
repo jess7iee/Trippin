@@ -15,7 +15,8 @@ struct SummaryView: View {
     var body: some View {
         List {
             Section {
-                TripMapView(places: allPlaces, showRoute: false, selection: $placeToOpen)
+                TripMapView(places: allPlaces, showRoute: false,
+                            flights: trip.reservations.compactMap(FlightPath.init), selection: $placeToOpen)
                     .frame(height: 260)
                     .listRowInsets(EdgeInsets())
                 HStack {
@@ -148,6 +149,37 @@ struct ReservationRow: View {
     var onOpenMap: () -> Void
 
     var body: some View {
+        if let flight = FlightInfo(reservation) {
+            flightBody(flight)
+        } else {
+            standardBody
+        }
+    }
+
+    private func flightBody(_ flight: FlightInfo) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                if let start = reservation.start {
+                    Text(start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                }
+                FlightCard(info: flight)
+                if let code = reservation.confirmationCode {
+                    Text("Booking \(code)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            if reservation.coordinate != nil {
+                Button(action: onOpenMap) { Image(systemName: "map") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Open in maps")
+            }
+        }
+    }
+
+    private var standardBody: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: reservation.kind.symbol)
                 .frame(width: 28, height: 28)

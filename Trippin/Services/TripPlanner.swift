@@ -19,6 +19,7 @@ enum TripPlanner {
         reservation.latitude = place?.coordinate.latitude
         reservation.longitude = place?.coordinate.longitude
         if reservation.address == nil { reservation.address = place?.address }
+        reservation.arrivalCoordinate = await locateArrival(parsed, in: trip)
 
         makeStops(for: reservation, parsed: parsed, coordinate: place?.coordinate, in: trip, context: context)
         try? context.save()
@@ -40,6 +41,9 @@ enum TripPlanner {
         reservation.end = parsed.end
         reservation.localName = parsed.localName
         reservation.address = parsed.address
+        let arrivalMoved = parsed.arrivalPlace != reservation.arrivalAddress || reservation.arrivalCoordinate == nil
+        reservation.arrivalAddress = parsed.arrivalPlace
+        if arrivalMoved { reservation.arrivalCoordinate = await locateArrival(parsed, in: trip) }
         extendTrip(trip, for: parsed)
 
         var coordinate = reservation.coordinate
@@ -74,6 +78,11 @@ enum TripPlanner {
         guard let query = parsed.address ?? (parsed.title.isEmpty ? nil : parsed.title) else { return nil }
         let region = await PlaceSearch.region(for: trip.destination)
         return await PlaceSearch.first(query, near: region)
+    }
+
+    private static func locateArrival(_ parsed: ParsedReservation, in trip: Trip) async -> CLLocationCoordinate2D? {
+        guard parsed.kind.isJourney, let query = parsed.arrivalPlace, !query.isEmpty else { return nil }
+        return await PlaceSearch.first(query)?.coordinate
     }
 
     @discardableResult

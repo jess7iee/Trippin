@@ -64,12 +64,23 @@ struct TripMapView: View {
     var places: [MapPlace]
     var showRoute: Bool
     var routes: [MKRoute] = []
+    var flights: [FlightPath] = []
     @Binding var selection: MapPlace?
 
     @State private var position: MapCameraPosition = .automatic
 
     var body: some View {
         Map(position: $position) {
+            ForEach(flights) { flight in
+                MapPolyline(coordinates: [flight.from, flight.to], contourStyle: .geodesic)
+                    .stroke(DayColor.color(flight.day).opacity(0.85),
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [8, 6]))
+                // Below the point, so it doesn't cover a departure pin (which sits above) at the same airport.
+                Annotation(flight.toCode ?? "Arrival", coordinate: flight.to, anchor: .top) {
+                    arrivalPin(flight)
+                }
+                .annotationTitles(.hidden)
+            }
             ForEach(places) { place in
                 if let coordinate = place.coordinate {
                     Annotation(place.name, coordinate: coordinate, anchor: .bottom) {
@@ -77,6 +88,8 @@ struct TripMapView: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("\(place.name), open in maps")
                     }
+                    // A flight's long title runs off the map; its path and arrival badge say enough.
+                    .annotationTitles(place.symbol == ReservationKind.flight.symbol ? .hidden : .automatic)
                 }
             }
             if showRoute {
@@ -97,8 +110,9 @@ struct TripMapView: View {
             MapCompass()
             MapScaleView()
         }
-        .onChange(of: places.map(\.id)) { _, _ in
-            withAnimation { position = .automatic }
+        .onAppear { position = framing }
+        .onChange(of: places.map(\.id) + flights.map(\.id)) { _, _ in
+            withAnimation { position = framing }
         }
         .overlay {
             if places.isEmpty {
@@ -108,6 +122,30 @@ struct TripMapView: View {
                     .background(.regularMaterial, in: Capsule())
             }
         }
+    }
+
+    /// A lone place gets a neighbourhood-sized view instead of the closest zoom,
+    /// which for an airport shows nothing but a roof.
+    private var framing: MapCameraPosition {
+        let coordinates = places.compactMap(\.coordinate)
+        if flights.isEmpty, coordinates.count == 1, let only = coordinates.first {
+            return .region(MKCoordinateRegion(center: only, latitudinalMeters: 6000, longitudinalMeters: 6000))
+        }
+        return .automatic
+    }
+
+    private func arrivalPin(_ flight: FlightPath) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "airplane.arrival")
+            if let code = flight.toCode { Text(code).monospaced() }
+        }
+        .font(.caption2.weight(.bold))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(DayColor.color(flight.day), in: Capsule())
+        .foregroundStyle(.white)
+        .shadow(radius: 1.5)
+        .accessibilityLabel("Arrival \(flight.toCode ?? "")")
     }
 
     private func pin(_ place: MapPlace) -> some View {

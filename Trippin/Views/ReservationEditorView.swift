@@ -14,7 +14,10 @@ struct ReservationFields: View {
         TextField("Confirmation code", text: optional(\.confirmationCode))
         OptionalDatePicker(title: draft.kind.startLabel, date: $draft.start)
         OptionalDatePicker(title: draft.kind.endLabel, date: $draft.end)
-        TextField("Address or place", text: optional(\.address), axis: .vertical)
+        TextField(draft.kind.isJourney ? "Departs from" : "Address or place", text: optional(\.address), axis: .vertical)
+        if draft.kind.isJourney {
+            TextField("Arrives at", text: optional(\.arrivalPlace), axis: .vertical)
+        }
     }
 
     /// Binds an optional string field to a text field, storing nil when empty.

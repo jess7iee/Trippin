@@ -47,6 +47,7 @@ struct ItineraryParserTests {
         #expect(parts(flight.start) == [2027, 3, 3, 11, 30])
         #expect(parts(flight.end) == [2027, 3, 4, 18, 10])
         #expect(flight.address == "Los Angeles Airport")
+        #expect(flight.arrivalPlace == "Shanghai Pudong Airport")
     }
 
     @Test func hotelsGetDatesNamesAndAddresses() {
@@ -72,6 +73,7 @@ struct ItineraryParserTests {
         #expect(parts(train.start) == [2027, 3, 8, 14, 5])
         #expect(train.end == nil)
         #expect(train.address == "Hangzhou Railway Station")
+        #expect(train.arrivalPlace == "Suzhou Railway Station")
     }
 
     @Test func returnFlightArrivingEarlierLocalTimeHasNoEnd() {
