@@ -175,12 +175,12 @@ private struct OpenInMapsDialog: ViewModifier {
         ), titleVisibility: .visible, presenting: place) { place in
             ForEach(MapsApp.allCases) { app in
                 Button("Open in \(app.name)") {
-                    app.open(name: searchName(place, for: app), coordinate: place.coordinate, address: place.address)
+                    app.open(text: searchText(place, for: app), coordinate: place.coordinate)
                 }
             }
             ForEach(MapsApp.allCases) { app in
                 Button("Directions in \(app.name)") {
-                    app.open(name: searchName(place, for: app), coordinate: place.coordinate, address: place.address, directions: true)
+                    app.open(text: searchText(place, for: app), coordinate: place.coordinate, directions: true)
                 }
             }
             if place.localName != nil || place.localAddress != nil {
@@ -197,10 +197,18 @@ private struct OpenInMapsDialog: ViewModifier {
         .sheet(item: $card) { LocalNameCard(place: $0) }
     }
 
-    /// Amap searches best with the local (Chinese) name.
-    private func searchName(_ place: MapPlace, for app: MapsApp) -> String {
-        app == .amap ? (place.localName ?? place.name) : place.name
+    /// Only the address goes to the maps app, never the stop's full title.
+    /// Amap gets the address in the local language, which it searches best;
+    /// the name is used only when there's no address at all.
+    private func searchText(_ place: MapPlace, for app: MapsApp) -> String {
+        let local = place.localAddress?.nonEmpty, english = place.address?.nonEmpty
+        let address = app == .amap ? (local ?? english) : (english ?? local)
+        return address ?? (app == .amap ? place.localName ?? place.name : place.name)
     }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }
 
 /// Big, clear local name and address to show a taxi driver, station staff or a host.

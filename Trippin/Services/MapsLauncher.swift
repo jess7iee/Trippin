@@ -24,8 +24,10 @@ enum MapsApp: String, CaseIterable, Identifiable {
         }
     }
 
-    func url(name: String, coordinate: CLLocationCoordinate2D?, address: String?, directions: Bool) -> URL? {
-        let query = address.map { "\(name), \($0)" } ?? name
+    /// `text` is what the maps app shows and searches for: just the address.
+    /// The coordinate, when known, is what actually places the pin.
+    func url(text: String, coordinate: CLLocationCoordinate2D?, directions: Bool) -> URL? {
+        let query = text, name = text
         var c = URLComponents()
         let ll = coordinate.map { "\($0.latitude),\($0.longitude)" }
 
@@ -93,8 +95,8 @@ enum MapsApp: String, CaseIterable, Identifiable {
     }
 
     @MainActor
-    func open(name: String, coordinate: CLLocationCoordinate2D?, address: String?, directions: Bool = false) {
-        guard let url = url(name: name, coordinate: coordinate, address: address, directions: directions) else { return }
+    func open(text: String, coordinate: CLLocationCoordinate2D?, directions: Bool = false) {
+        guard let url = url(text: text, coordinate: coordinate, directions: directions) else { return }
         UIApplication.shared.open(url)
     }
 }
