@@ -69,6 +69,8 @@ final class Reservation {
     var latitude: Double?
     var longitude: Double?
     var rawText: String = ""
+    /// Name as written locally, e.g. パーク ハイアット 東京.
+    var localName: String?
     var trip: Trip?
 
     @Relationship(deleteRule: .cascade, inverse: \Stop.reservation) var stops: [Stop] = []
@@ -80,6 +82,7 @@ final class Reservation {
         self.start = parsed.start
         self.end = parsed.end
         self.address = parsed.address
+        self.localName = parsed.localName
         self.rawText = rawText
     }
 
@@ -109,8 +112,22 @@ final class Stop {
     var fixedTime: Date?
     var note: String = ""
     var symbol: String = "mappin"
+    /// Name in the local language and script, e.g. 新宿駅 for Shinjuku Station.
+    var localName: String?
+    /// Address in the local language, handy for taxis.
+    var localAddress: String?
+    /// True once the app has looked up the local name and address.
+    var localLookupDone: Bool = false
     var trip: Trip?
     var reservation: Reservation?
+
+    /// The local name, only when it differs from the display name.
+    var distinctLocalName: String? {
+        guard let localName, !localName.isEmpty,
+              localName.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) != .orderedSame,
+              !name.contains(localName) else { return nil }
+        return localName
+    }
 
     init(name: String, address: String? = nil, coordinate: CLLocationCoordinate2D? = nil,
          dayIndex: Int, sortOrder: Double, fixedTime: Date? = nil, note: String = "", symbol: String = "mappin") {

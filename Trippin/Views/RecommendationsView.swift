@@ -123,7 +123,7 @@ struct RecommendationsView: View {
         for s in results where s.selected {
             guard var place = s.place else { continue }
             place.name = s.rec.name
-            TripPlanner.addStop(place, note: s.rec.reason, symbol: symbol(for: s.rec.category), day: s.day, to: trip, context: context)
+            TripPlanner.addStop(place, localName: s.rec.localName, note: s.rec.reason, symbol: symbol(for: s.rec.category), day: s.day, to: trip, context: context)
             touchedDays.insert(s.day)
         }
         for day in touchedDays { TripPlanner.optimize(day: day, of: trip) }
@@ -162,6 +162,9 @@ private struct SuggestionRow: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(suggestion.rec.name).font(.body.weight(.medium))
+                    if !suggestion.rec.localName.isEmpty, suggestion.rec.localName != suggestion.rec.name {
+                        Text(suggestion.rec.localName).font(.subheadline).textSelection(.enabled)
+                    }
                     Text(suggestion.rec.reason).font(.subheadline).foregroundStyle(.secondary)
                     HStack(spacing: 8) {
                         Text("For: \(suggestion.rec.forTodo)")

@@ -71,6 +71,9 @@ struct ImportEmailView: View {
                             ForEach(ReservationKind.allCases) { Label($0.label, systemImage: $0.symbol).tag($0) }
                         }
                         TextField("Title", text: $draft.title)
+                        TextField("Local name (e.g. パーク ハイアット 東京)", text: Binding(
+                            get: { draft.localName ?? "" },
+                            set: { draft.localName = $0.isEmpty ? nil : $0 }))
                         TextField("Confirmation code", text: Binding(
                             get: { draft.confirmationCode ?? "" },
                             set: { draft.confirmationCode = $0.isEmpty ? nil : $0 }))

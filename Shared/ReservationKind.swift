@@ -41,9 +41,12 @@ struct ParsedReservation: Equatable, Identifiable {
     var end: Date?
     /// Address or place name used to find the location on the map.
     var address: String?
+    /// Name in the local language and script, when known.
+    var localName: String?
 
-    static func == (lhs: ParsedReservation, rhs: ParsedReservation) -> Bool {
+    static func ==(lhs: ParsedReservation, rhs: ParsedReservation) -> Bool {
         lhs.kind == rhs.kind && lhs.title == rhs.title && lhs.confirmationCode == rhs.confirmationCode
             && lhs.start == rhs.start && lhs.end == rhs.end && lhs.address == rhs.address
+            && lhs.localName == rhs.localName
     }
 }
