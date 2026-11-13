@@ -1,4 +1,6 @@
-// Draws Trippin's app icon: a folded map with a dotted route and an orange pin.
+// Earlier app icon designs (folded map; pin and plane). The current icon is the suitcase
+// drawing in AppIcon-suitcase-source.png, prepared by SuitcaseIcon.swift.
+// Draws Trippin's earlier app icon: a folded map with a dotted route and an orange pin.
 // Regenerate the icon set with:
 //   xcrun swiftc -o /tmp/appicon Design/AppIcon.swift && /tmp/appicon Trippin/Assets.xcassets/AppIcon.appiconset
 import AppKit
