@@ -63,20 +63,31 @@ private struct PagePicker: View {
     @Binding var page: Int
 
     var body: some View {
+        // Summary stays pinned on the left so it's one tap away from any day.
+        HStack(spacing: 0) {
+            chip(title: "Summary", subtitle: nil, tag: -1)
+                .padding(.leading)
+                .padding(.trailing, 8)
+            Divider().frame(height: 32)
+            days
+        }
+    }
+
+    private var days: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    chip(title: "Summary", subtitle: nil, tag: -1)
                     ForEach(0..<trip.dayCount, id: \.self) { day in
                         chip(title: "Day \(day + 1)",
                              subtitle: trip.date(forDay: day).formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
                              tag: day)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 8)
             }
             .onChange(of: page) { _, newValue in
+                guard newValue >= 0 else { return }
                 withAnimation { proxy.scrollTo(newValue, anchor: .center) }
             }
         }

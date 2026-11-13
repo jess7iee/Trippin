@@ -265,6 +265,8 @@ extension ClaudeClient {
         var dayPlans: [String]
         var todos: [String]
         var extraRequest: String
+        /// 1-based day to plan for only, or nil for the whole trip.
+        var focusDay: Int? = nil
     }
 
     func recommendations(for context: TripContext) async throws -> [Recommendation] {
@@ -276,7 +278,7 @@ extension ClaudeClient {
                 "searchQuery": ["type": "string", "description": "Query that finds this exact place in Apple Maps, including neighborhood and city"],
                 "category": ["type": "string", "description": "e.g. food, sight, shopping, errand, nightlife"],
                 "reason": ["type": "string", "description": "One sentence on why it fits"],
-                "forTodo": ["type": "string", "description": "The to-do item this answers, or 'general'"],
+                "forTodo": ["type": "string", "description": "The to-do item this answers, copied exactly as written in the list, or 'general'"],
                 "suggestedDay": ["type": "integer", "description": "1-based day number that keeps the day geographically tight"],
                 "durationMinutes": ["type": "integer"],
             ],
@@ -307,11 +309,12 @@ extension ClaudeClient {
         Things the traveler wants or needs to do:
         \(context.todos.isEmpty ? "(none listed)" : context.todos.map { "- \($0)" }.joined(separator: "\n"))
         \(context.extraRequest.isEmpty ? "" : "\nAlso: \(context.extraRequest)")
+        \(context.focusDay.map { "\nPlan for Day \($0) only: suggest places near that day's plan and set suggestedDay to \($0) for every suggestion. Don't suggest places already in the plan." } ?? "\nDon't suggest places already in the plan.")
         """
         let result = try await structured(RecommendationResult.self, system: system, prompt: prompt, schema: schema)
         return result.recommendations.map {
             var rec = $0
-            rec.suggestedDay = min(max(rec.suggestedDay, 1), context.dayCount)
+            rec.suggestedDay = context.focusDay ?? min(max(rec.suggestedDay, 1), context.dayCount)
             return rec
         }
     }

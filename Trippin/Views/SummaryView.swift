@@ -24,6 +24,7 @@ struct SummaryView: View {
                     .frame(height: 260)
                     .openInMapsDialog(place: $placeToOpen)
                     .listRowInsets(EdgeInsets())
+                TripDatesRow(trip: trip)
                 HStack {
                     stat("\(trip.dayCount)", "days")
                     Divider()
@@ -82,12 +83,8 @@ struct SummaryView: View {
 
             Section {
                 if showTodos {
-                    ForEach(trip.todos.sorted { $0.createdAt < $1.createdAt }) { todo in
-                        TodoRow(todo: todo)
-                    }
-                    .onDelete { offsets in
-                        let items = trip.todos.sorted { $0.createdAt < $1.createdAt }
-                        for index in offsets { context.delete(items[index]) }
+                    ForEach(trip.todos.sorted { ($0.isDone ? 1 : 0, $0.createdAt) < ($1.isDone ? 1 : 0, $1.createdAt) }) { todo in
+                        TodoRow(todo: todo) { context.delete(todo) }
                     }
                     HStack {
                         TextField("Add something you want or need to do", text: $newTodo)
@@ -177,18 +174,70 @@ private struct CollapsibleHeader: View {
 
 private struct TodoRow: View {
     @Bindable var todo: TodoItem
+    var onRemove: () -> Void
 
     var body: some View {
-        Button { todo.isDone.toggle() } label: {
-            HStack {
-                Image(systemName: todo.isDone ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(todo.isDone ? Color.accentColor : .secondary)
-                Text(todo.text)
-                    .strikethrough(todo.isDone)
-                    .foregroundStyle(todo.isDone ? .secondary : .primary)
+        HStack {
+            Button { todo.isDone.toggle() } label: {
+                HStack {
+                    Image(systemName: todo.isDone ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(todo.isDone ? Color.accentColor : .secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(todo.text)
+                            .strikethrough(todo.isDone)
+                            .foregroundStyle(todo.isDone ? .secondary : .primary)
+                        if todo.isDone, !todo.plannedAs.isEmpty {
+                            Text("Planned: \(todo.plannedAs)").font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(todo.text)
+            .accessibilityValue(todo.isDone ? "Done" : "Not done")
+
+            Button(role: .destructive, action: onRemove) {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Remove \(todo.text)")
         }
-        .buttonStyle(.plain)
+        .swipeActions { Button("Remove", systemImage: "trash", role: .destructive, action: onRemove) }
+    }
+}
+
+/// When the trip leaves and comes back: the first and last flight or train if there
+/// are any, otherwise the trip's own dates.
+private struct TripDatesRow: View {
+    let trip: Trip
+
+    var body: some View {
+        HStack(spacing: 0) {
+            end(title: "Departs", date: departure, alignment: .leading)
+            Spacer()
+            Image(systemName: "arrow.right").foregroundStyle(.tertiary)
+            Spacer()
+            end(title: "Returns", date: returning, alignment: .trailing)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var journeys: [Reservation] {
+        trip.sortedReservations.filter { $0.kind.isJourney && $0.start != nil }
+    }
+    private var departure: Date { journeys.first?.start ?? trip.startDate }
+    private var returning: Date { journeys.last.flatMap { $0.start } ?? trip.endDate }
+
+    private func end(title: String, date: Date, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                .font(.headline)
+            Text(date.formatted(.dateTime.year())).font(.caption2).foregroundStyle(.tertiary)
+        }
     }
 }
 

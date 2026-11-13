@@ -13,6 +13,7 @@ struct DayView: View {
     @State private var transport: Transport = .walking
     @State private var optimizeMessage: String?
     @State private var detail: Stop?
+    @State private var showingIdeas = false
 
     enum Transport: String, CaseIterable, Identifiable {
         case walking = "Walk", driving = "Drive"
@@ -44,7 +45,7 @@ struct DayView: View {
 
             Section {
                 if stops.isEmpty {
-                    Text("Nothing planned yet. Add places, or get recommendations from the Summary page.")
+                    Text("Nothing planned yet. Add a place, or let Claude suggest some.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
@@ -66,6 +67,7 @@ struct DayView: View {
                 .onDelete(perform: delete)
 
                 Button { showingSearch = true } label: { Label("Add a place", systemImage: "plus") }
+                Button { showingIdeas = true } label: { Label("Suggest places for this day", systemImage: "sparkles") }
             } header: {
                 HStack {
                     Text(trip.date(forDay: day).formatted(.dateTime.weekday(.wide).month(.wide).day()))
@@ -89,6 +91,7 @@ struct DayView: View {
             PlaceSearchView(trip: trip, day: day)
         }
         .sheet(item: $detail) { StopDetailView(stop: $0, trip: trip) }
+        .sheet(isPresented: $showingIdeas) { RecommendationsView(trip: trip, focusDay: day) }
         .task(id: routeKey) { await loadRoutes() }
         #if DEBUG
         .onAppear {

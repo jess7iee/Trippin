@@ -191,6 +191,8 @@ final class TodoItem {
     var text: String = ""
     var isDone: Bool = false
     var createdAt: Date = Date()
+    /// Places added for it from recommendations, e.g. "Ichiran Shibuya, Fuunji".
+    var plannedAs: String = ""
     var trip: Trip?
 
     init(text: String) {

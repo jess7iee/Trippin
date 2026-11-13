@@ -8,6 +8,8 @@ struct RecommendationsView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Bindable var trip: Trip
+    /// Zero-based day to plan for only, or nil for the whole trip.
+    var focusDay: Int? = nil
 
     @State private var extra = ""
     @State private var results: [Suggestion] = []
@@ -26,13 +28,19 @@ struct RecommendationsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("You want to do") {
+                Section {
                     let todos = trip.todos.filter { !$0.isDone }
-                    if todos.isEmpty {
+                    if todos.isEmpty && focusDay == nil {
                         Text("Add things to the “Want to do” list on the Summary page.").foregroundStyle(.secondary)
                     }
                     ForEach(todos) { Text("• \($0.text)") }
-                    TextField("Anything else? (budget, pace, dietary needs…)", text: $extra, axis: .vertical)
+                    TextField(focusDay == nil ? "Anything else? (budget, pace, dietary needs…)"
+                                              : "What do you feel like? (lunch nearby, a museum, a rainy-day plan…)",
+                              text: $extra, axis: .vertical)
+                } header: {
+                    Text("You want to do")
+                } footer: {
+                    if focusDay != nil { Text("Suggestions stay close to what's already planned for this day.") }
                 }
 
                 Section {
@@ -60,7 +68,7 @@ struct RecommendationsView: View {
                     }
                 }
             }
-            .navigationTitle("Recommendations")
+            .navigationTitle(focusDay.map { "Ideas for Day \($0 + 1)" } ?? "Recommendations")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
@@ -100,7 +108,8 @@ struct RecommendationsView: View {
             dayCount: trip.dayCount,
             dayPlans: dayPlans,
             todos: trip.todos.filter { !$0.isDone }.map(\.text),
-            extraRequest: extra)
+            extraRequest: extra,
+            focusDay: focusDay.map { $0 + 1 })
         do {
             let recs = try await ClaudeClient().recommendations(for: context)
             let region = await PlaceSearch.region(for: trip.destination)
@@ -110,7 +119,11 @@ struct RecommendationsView: View {
                 found.append(Suggestion(rec: rec, place: place, day: rec.suggestedDay - 1, selected: place != nil))
             }
             results = found
-            if found.isEmpty { error = "No recommendations came back. Try adding more detail." }
+            if found.isEmpty {
+                error = focusDay == nil && trip.todos.allSatisfy(\.isDone)
+                    ? "Everything on your list is planned. Add more to “Want to do”, or describe what you'd like above."
+                    : "No recommendations came back. Try adding more detail."
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -125,8 +138,20 @@ struct RecommendationsView: View {
             touchedDays.insert(s.day)
         }
         for day in touchedDays { TripPlanner.optimize(day: day, of: trip) }
+        tickOffTodos()
         try? context.save()
         dismiss()
+    }
+
+    /// Crosses off each to-do that got at least one place, so the next search skips it.
+    private func tickOffTodos() {
+        let added = results.filter { $0.selected && $0.place != nil }
+        for todo in trip.todos where !todo.isDone {
+            let names = added.filter { TodoMatch.answers($0.rec.forTodo, todo: todo.text) }.map(\.rec.name)
+            guard !names.isEmpty else { continue }
+            todo.isDone = true
+            todo.plannedAs = names.joined(separator: ", ")
+        }
     }
 
     private func symbol(for category: String) -> String {
