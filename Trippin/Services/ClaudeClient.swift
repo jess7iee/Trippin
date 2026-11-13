@@ -31,20 +31,13 @@ struct ClaudeClient {
     /// Sends one request whose answer must match `schema`, and decodes it as `T`.
     func structured<T: Decodable>(_ type: T.Type, system: String, prompt: String,
                                   schema: [String: Any], effort: String = "medium") async throws -> T {
-        guard let apiKey else { throw ClaudeError.missingKey }
+        try await structured(type, system: system, blocks: [.init(text: prompt)], schema: schema, effort: effort)
+    }
 
-        let body: [String: Any] = [
-            "model": Self.model,
-            "max_tokens": 16000,
-            "system": system,
-            "messages": [["role": "user", "content": prompt]],
-            "output_config": [
-                "effort": effort,
-                "format": ["type": "json_schema", "schema": schema],
-            ],
-            // If a safety classifier declines, let the API retry on a suitable model.
-            "fallbacks": "default",
-        ]
+    /// Same, with the user message split into blocks so a stable leading part can be cached.
+    func structured<T: Decodable>(_ type: T.Type, system: String, blocks: [ClaudeRequest.Block],
+                                  schema: [String: Any], effort: String = "medium") async throws -> T {
+        guard let apiKey else { throw ClaudeError.missingKey }
 
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
@@ -53,7 +46,8 @@ struct ClaudeClient {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2026-10-21", forHTTPHeaderField: "anthropic-version")
         request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = try ClaudeRequest.body(model: Self.model, system: system, blocks: blocks,
+                                                  schema: schema, effort: effort)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -67,6 +61,11 @@ struct ClaudeClient {
         }
 
         let message = try JSONDecoder().decode(MessageResponse.self, from: data)
+        #if DEBUG
+        if let u = message.usage {
+            print("Claude usage: input \(u.inputTokens), cache write \(u.cacheCreationInputTokens ?? 0), cache read \(u.cacheReadInputTokens ?? 0), output \(u.outputTokens)")
+        }
+        #endif
         if message.stopReason == "refusal" { throw ClaudeError.refused }
         guard let text = message.content.first(where: { $0.type == "text" })?.text,
               let json = text.data(using: .utf8) else { throw ClaudeError.emptyResponse }
@@ -82,11 +81,25 @@ struct ClaudeClient {
             var type: String
             var text: String?
         }
+        struct Usage: Decodable {
+            var inputTokens: Int
+            var outputTokens: Int
+            var cacheCreationInputTokens: Int?
+            var cacheReadInputTokens: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case inputTokens = "input_tokens"
+                case outputTokens = "output_tokens"
+                case cacheCreationInputTokens = "cache_creation_input_tokens"
+                case cacheReadInputTokens = "cache_read_input_tokens"
+            }
+        }
         var content: [Block]
         var stopReason: String?
+        var usage: Usage?
 
         enum CodingKeys: String, CodingKey {
-            case content
+            case content, usage
             case stopReason = "stop_reason"
         }
     }
@@ -311,19 +324,24 @@ extension ClaudeClient {
         the day where it sits closest to that day's existing plans, so travel between stops stays short, and \
         avoid overloading any single day. Only suggest places you are confident exist.
         """
-        let prompt = """
+        // The trip and its plan come first and are cached: "Try again" and ideas for
+        // other days of the same trip reuse them. What changes per request goes after.
+        let tripContext = """
         Destination: \(context.destination)
         Trip: \(context.dayCount) days starting \(formatter.string(from: context.startDate))
 
         Current plan:
         \(context.dayPlans.isEmpty ? "(nothing planned yet)" : context.dayPlans.joined(separator: "\n"))
-
+        """
+        let request = """
         Things the traveler wants or needs to do:
         \(context.todos.isEmpty ? "(none listed)" : context.todos.map { "- \($0)" }.joined(separator: "\n"))
         \(context.extraRequest.isEmpty ? "" : "\nAlso: \(context.extraRequest)")
         \(context.focusDay.map { "\nPlan for Day \($0) only: suggest places near that day's plan and set suggestedDay to \($0) for every suggestion. Don't suggest places already in the plan." } ?? "\nDon't suggest places already in the plan.")
         """
-        let result = try await structured(RecommendationResult.self, system: system, prompt: prompt, schema: schema)
+        let result = try await structured(RecommendationResult.self, system: system,
+                                          blocks: [.init(text: tripContext, cached: true), .init(text: request)],
+                                          schema: schema)
         return result.recommendations.map {
             var rec = $0
             rec.suggestedDay = context.focusDay ?? min(max(rec.suggestedDay, 1), context.dayCount)
