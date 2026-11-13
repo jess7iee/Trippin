@@ -1,4 +1,4 @@
-// Draws Trippin's app icon: a map pin, a dotted takeoff route and a climbing plane.
+// Draws Trippin's app icon: a folded map with a dotted route and an orange pin.
 // Regenerate the icon set with:
 //   xcrun swiftc -o /tmp/appicon Design/AppIcon.swift && /tmp/appicon Trippin/Assets.xcassets/AppIcon.appiconset
 import AppKit
@@ -85,7 +85,7 @@ func dashedCurve(_ ctx: CGContext, from a: CGPoint, control c: CGPoint, to b: CG
     ctx.restoreGState()
 }
 
-// A: pin → dotted arc → plane
+// Earlier design: pin → dotted takeoff route → plane.
 func conceptRoute(_ ctx: CGContext, _ p: Palette) {
     let tip = CGPoint(x: 300, y: 840), r: CGFloat = 122
     let head = CGPoint(x: tip.x, y: tip.y - r * 2.15)
@@ -100,6 +100,63 @@ func conceptRoute(_ ctx: CGContext, _ p: Palette) {
     ctx.restoreGState()
 }
 
-render("AppIcon", .light, conceptRoute)
-render("AppIcon-Dark", .dark, conceptRoute)
-render("AppIcon-Tinted", .tinted, conceptRoute)
+// Folded map with a pin standing on it.
+func conceptMap(_ ctx: CGContext, _ p: Palette, _ v: Variant) {
+    let left: CGFloat = 196, w: CGFloat = 211, top: CGFloat = 262, h: CGFloat = 520, skew: CGFloat = 46
+    // Panel shades: lit, in shadow, lit — the zig-zag of a folded map.
+    let shades: [CGColor] = v == .tinted
+        ? [rgb(0xFFFFFF), rgb(0xB8B8B8), rgb(0xFFFFFF)]
+        : v == .dark ? [rgb(0x2B6A53), rgb(0x1F5040), rgb(0x2B6A53)] : [rgb(0xFFFFFF), rgb(0xDDF1E8), rgb(0xFFFFFF)]
+    let ink: CGColor = v == .tinted ? rgb(0x6A6A6A) : v == .dark ? rgb(0x5FE0AE) : rgb(0x11885F)
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: 18), blur: 36, color: rgb(0x000000, 0.30))
+    ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+    var panels: [CGPath] = []
+    for i in 0..<3 {
+        let x = left + CGFloat(i) * w
+        let up = i % 2 == 1   // middle panel tilts the other way
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: x, y: top + (up ? skew : 0)))
+        path.addLine(to: CGPoint(x: x + w, y: top + (up ? 0 : skew)))
+        path.addLine(to: CGPoint(x: x + w, y: top + h + (up ? 0 : skew)))
+        path.addLine(to: CGPoint(x: x, y: top + h + (up ? skew : 0)))
+        path.closeSubpath()
+        panels.append(path)
+        ctx.setFillColor(shades[i]); ctx.addPath(path); ctx.fillPath()
+    }
+    ctx.endTransparencyLayer()
+    ctx.restoreGState()
+
+    // Map details: a river and a road, clipped to the map.
+    ctx.saveGState()
+    for path in panels { ctx.addPath(path) }
+    ctx.clip()
+    ctx.setStrokeColor(ink.copy(alpha: 0.16)!); ctx.setLineCap(.round)
+    ctx.setLineWidth(34)
+    ctx.move(to: CGPoint(x: 150, y: 470)); ctx.addCurve(to: CGPoint(x: 880, y: 360), control1: CGPoint(x: 400, y: 380), control2: CGPoint(x: 600, y: 560)); ctx.strokePath()
+    ctx.setLineWidth(18)
+    ctx.move(to: CGPoint(x: 330, y: 220)); ctx.addLine(to: CGPoint(x: 470, y: 860)); ctx.strokePath()
+    // The route, dotted, ending at the pin.
+    ctx.setStrokeColor(ink); ctx.setLineWidth(30); ctx.setLineDash(phase: 0, lengths: [1, 56])
+    ctx.move(to: CGPoint(x: 270, y: 700)); ctx.addQuadCurve(to: CGPoint(x: 625, y: 640), control: CGPoint(x: 400, y: 500))
+    ctx.strokePath()
+    ctx.restoreGState()
+
+    // The pin, standing on the map with a little shadow at its point.
+    let tip = CGPoint(x: 660, y: 650)
+    ctx.setFillColor(rgb(0x000000, v == .tinted ? 0.35 : 0.22))
+    ctx.fillEllipse(in: CGRect(x: tip.x - 58, y: tip.y - 16, width: 116, height: 32))
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: 12), blur: 26, color: rgb(0x000000, 0.30))
+    // In the tinted icon the map is white, so the pin is dark to stand out.
+    pin(ctx, tip: CGPoint(x: tip.x, y: tip.y + 4), r: 120, color: v == .tinted ? rgb(0x3A3A3A) : p.accent,
+        hole: rgb(0xFFFFFF))
+    ctx.restoreGState()
+}
+
+// The folded map is the app icon. Pass "route" as the second argument for the
+// earlier pin-and-plane design.
+let useMap = !(CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "route")
+for (name, v) in [("AppIcon", Variant.light), ("AppIcon-Dark", .dark), ("AppIcon-Tinted", .tinted)] {
+    render(name, v) { ctx, p in useMap ? conceptMap(ctx, p, v) : conceptRoute(ctx, p) }
+}
