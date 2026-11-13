@@ -13,6 +13,9 @@ struct MapPlace: Identifiable, Equatable {
     var number: Int?
     var localName: String?
     var localAddress: String?
+    /// What to search for in a maps app: the place's own name, without labels
+    /// like "Check in:". For flights and trains, the airport or station.
+    var searchName: String
 
     static func == (a: MapPlace, b: MapPlace) -> Bool { a.id == b.id && a.number == b.number }
 
@@ -31,6 +34,13 @@ struct MapPlace: Identifiable, Equatable {
         self.number = number
         localName = stop.distinctLocalName
         localAddress = stop.localAddress
+        searchName = Self.searchName(title: stop.reservation?.title ?? stop.name,
+                                     kind: stop.reservation?.kind, address: stop.address)
+    }
+
+    private static func searchName(title: String, kind: ReservationKind?, address: String?) -> String {
+        if kind?.isJourney == true, let address, !address.isEmpty { return address }
+        return title
     }
 
     init(_ reservation: Reservation) {
@@ -42,6 +52,7 @@ struct MapPlace: Identifiable, Equatable {
         symbol = reservation.kind.symbol
         localName = reservation.localName
         localAddress = reservation.stops.lazy.compactMap(\.localAddress).first
+        searchName = Self.searchName(title: reservation.title, kind: reservation.kind, address: reservation.address)
     }
 
     init(_ place: PlaceSearch.Place) {
@@ -51,6 +62,7 @@ struct MapPlace: Identifiable, Equatable {
         coordinate = place.coordinate
         day = 0
         symbol = "mappin"
+        searchName = place.name
     }
 }
 
@@ -197,13 +209,12 @@ private struct OpenInMapsDialog: ViewModifier {
         .sheet(item: $card) { LocalNameCard(place: $0) }
     }
 
-    /// Only the address goes to the maps app, never the stop's full title.
-    /// Amap gets the address in the local language, which it searches best;
-    /// the name is used only when there's no address at all.
+    /// The maps app searches for the place by name (e.g. "Fairfield by Marriott
+    /// Kunming Xishan", not "Check in: …" or the street address). Amap gets the
+    /// local-language name, which it searches best.
     private func searchText(_ place: MapPlace, for app: MapsApp) -> String {
-        let local = place.localAddress?.nonEmpty, english = place.address?.nonEmpty
-        let address = app == .amap ? (local ?? english) : (english ?? local)
-        return address ?? (app == .amap ? place.localName ?? place.name : place.name)
+        if app == .amap, let local = place.localName?.nonEmpty { return local }
+        return place.searchName.nonEmpty ?? place.address ?? place.name
     }
 }
 

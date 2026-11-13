@@ -24,8 +24,8 @@ enum MapsApp: String, CaseIterable, Identifiable {
         }
     }
 
-    /// `text` is what the maps app shows and searches for: just the address.
-    /// The coordinate, when known, is what actually places the pin.
+    /// `text` is what the maps app searches for: the place's name.
+    /// The coordinate, when known, places the pin (Apple Maps, Amap) or centres the map (Google).
     func url(text: String, coordinate: CLLocationCoordinate2D?, directions: Bool) -> URL? {
         let query = text, name = text
         var c = URLComponents()
@@ -47,14 +47,16 @@ enum MapsApp: String, CaseIterable, Identifiable {
         case .google:
             if isInstalled {
                 c.scheme = "comgooglemaps"; c.host = ""
+                // Search by name; the coordinate only centres the map on the right area.
                 c.queryItems = directions
-                    ? [URLQueryItem(name: "daddr", value: ll ?? query), URLQueryItem(name: "directionsmode", value: "transit")]
-                    : [URLQueryItem(name: "q", value: ll ?? query), URLQueryItem(name: "zoom", value: "16")]
+                    ? [URLQueryItem(name: "daddr", value: query), URLQueryItem(name: "directionsmode", value: "transit")]
+                    : [URLQueryItem(name: "q", value: query), URLQueryItem(name: "zoom", value: "16")]
+                        + (ll.map { [URLQueryItem(name: "center", value: $0)] } ?? [])
             } else {
                 c.scheme = "https"; c.host = "www.google.com"; c.path = "/maps/" + (directions ? "dir/" : "search/")
                 c.queryItems = directions
-                    ? [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "destination", value: ll ?? query)]
-                    : [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: ll ?? query)]
+                    ? [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "destination", value: query)]
+                    : [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: query)]
             }
 
         case .amap:
