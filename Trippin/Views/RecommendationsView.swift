@@ -150,13 +150,15 @@ struct RecommendationsView: View {
             guard var place = s.place else {
                 TripPlanner.addUnlocatedStop(name: s.rec.name, address: s.rec.address.isEmpty ? nil : s.rec.address,
                                              localName: s.rec.localName, note: s.rec.reason, symbol: symbol,
-                                             day: s.day, to: trip, context: context)
+                                             searchQuery: s.rec.searchQuery, day: s.day, to: trip, context: context)
                 continue
             }
             place.name = s.rec.name
             if s.approximate, !s.rec.address.isEmpty { place.address = s.rec.address }
             let note = s.approximate ? s.rec.reason + " (Approximate location; check it in Amap.)" : s.rec.reason
-            TripPlanner.addStop(place, localName: s.rec.localName, note: note, symbol: symbol, day: s.day, to: trip, context: context)
+            TripPlanner.addStop(place, localName: s.rec.localName, note: note, symbol: symbol,
+                                approximate: s.approximate, searchQuery: s.approximate ? s.rec.searchQuery : nil,
+                                day: s.day, to: trip, context: context)
             touchedDays.insert(s.day)
         }
         for day in touchedDays { TripPlanner.optimize(day: day, of: trip) }
@@ -274,8 +276,13 @@ private struct SuggestionRow: View {
                 Spacer()
                 let place = suggestion.place ?? PlaceSearch.Place(name: suggestion.rec.name, address: suggestion.rec.address,
                                                                     coordinate: CLLocationCoordinate2D())
+                // Exact Apple Maps finds open at their pin; anything else is searched by name.
                 OpenInMapsButton(place: MapPlace(place, localName: suggestion.rec.localName.isEmpty ? nil : suggestion.rec.localName,
-                                                 countryCode: countryCode, hasLocation: suggestion.place != nil)) { Image(systemName: "map") }
+                                                 countryCode: countryCode, hasLocation: suggestion.place != nil,
+                                                 isApproximate: suggestion.place == nil || suggestion.approximate,
+                                                 searchName: suggestion.place == nil || suggestion.approximate ? suggestion.rec.searchQuery : nil)) {
+                    Image(systemName: "map")
+                }
                     .buttonStyle(.borderless)
             }
             Picker("Day", selection: $suggestion.day) {

@@ -145,6 +145,12 @@ final class Stop {
     var localLookupDone: Bool = false
     /// ISO country code from the geocoder, e.g. "CN". Picks which apps the place can open in.
     var countryCode: String?
+    /// True when the location is an estimate (Apple Maps didn't list the place).
+    /// Maps apps then search by name instead of dropping a pin there.
+    var approximateLocation: Bool = false
+    /// What to search for in a maps app when the location isn't exact, e.g.
+    /// "Donglaishun Wangfujing, Dongcheng, Beijing".
+    var searchQuery: String?
     var trip: Trip?
     var reservation: Reservation?
 

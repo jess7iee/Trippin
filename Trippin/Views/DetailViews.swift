@@ -221,10 +221,9 @@ private struct PlaceSection: View {
             if address == nil, localAddress == nil, place.coordinate == nil {
                 Text("Location not found").foregroundStyle(.orange)
             }
-            if place.coordinate != nil || address != nil {
-                OpenInMapsButton(place: place) {
-                    Label("Open in Maps", systemImage: "map")
-                }
+            // Without an exact location the maps app searches by name.
+            OpenInMapsButton(place: place) {
+                Label(place.isApproximate ? "Search in Maps" : "Open in Maps", systemImage: "map")
             }
         }
     }

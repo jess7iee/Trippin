@@ -164,22 +164,26 @@ enum TripPlanner {
     /// A stop whose location isn't known yet. It shows "Location not found" with a
     /// Change place button, and still opens in Amap / Dianping by name.
     static func addUnlocatedStop(name: String, address: String?, localName: String?, note: String, symbol: String,
-                                 day: Int, to trip: Trip, context: ModelContext) {
+                                 searchQuery: String? = nil, day: Int, to trip: Trip, context: ModelContext) {
         let order = (trip.stops(onDay: day).last?.sortOrder ?? 0) + 1
         let stop = Stop(name: name, address: address, dayIndex: day, sortOrder: order, note: note, symbol: symbol)
         stop.localName = (localName?.isEmpty ?? true) ? nil : localName
         if let address, EmailParser.isLocalScript(address) { stop.localAddress = address }
+        stop.searchQuery = searchQuery
         context.insert(stop)
         stop.trip = trip
         try? context.save()
     }
 
     static func addStop(_ place: PlaceSearch.Place, localName: String? = nil, note: String = "", symbol: String = "mappin",
+                        approximate: Bool = false, searchQuery: String? = nil,
                         day: Int, to trip: Trip, context: ModelContext) {
         let order = (trip.stops(onDay: day).last?.sortOrder ?? 0) + 1
         let stop = Stop(name: place.name, address: place.address, coordinate: place.coordinate,
                         dayIndex: day, sortOrder: order, note: note, symbol: symbol)
         stop.localName = (localName?.isEmpty ?? true) ? nil : localName
+        stop.approximateLocation = approximate
+        stop.searchQuery = searchQuery
         context.insert(stop)
         stop.trip = trip
         try? context.save()
@@ -206,6 +210,7 @@ enum TripPlanner {
     /// Points a stop at a new place and clears the old local name so it is looked up again.
     static func relocate(_ stop: Stop, to place: PlaceSearch.Place, rename: Bool) {
         if rename { stop.name = place.name }
+        stop.approximateLocation = false
         stop.address = place.address
         stop.coordinate = place.coordinate
         stop.localName = nil

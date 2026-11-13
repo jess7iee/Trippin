@@ -18,6 +18,8 @@ struct MapPlace: Identifiable, Equatable {
     var searchName: String
     /// ISO country code when known, e.g. "CN".
     var countryCode: String?
+    /// The coordinate is an estimate (or missing): maps apps search by name instead.
+    var isApproximate = false
 
     /// The apps worth offering for this place.
     var mapsApps: [MapsApp] { MapsApp.allCases.filter { $0.isUseful(inCountry: countryCode) } }
@@ -42,6 +44,8 @@ struct MapPlace: Identifiable, Equatable {
         searchName = Self.searchName(title: stop.reservation?.title ?? stop.name,
                                      kind: stop.reservation?.kind, address: stop.address)
         countryCode = stop.countryCode
+        isApproximate = stop.approximateLocation || stop.coordinate == nil
+        if isApproximate, let query = stop.searchQuery, !query.isEmpty { searchName = query }
     }
 
     /// The booking's own address when it's already in the local script and fuller
@@ -69,16 +73,18 @@ struct MapPlace: Identifiable, Equatable {
         countryCode = reservation.stops.lazy.compactMap(\.countryCode).first
     }
 
-    init(_ place: PlaceSearch.Place, localName: String? = nil, countryCode: String? = nil, hasLocation: Bool = true) {
+    init(_ place: PlaceSearch.Place, localName: String? = nil, countryCode: String? = nil, hasLocation: Bool = true,
+         isApproximate: Bool = false, searchName: String? = nil) {
         id = place.id
         name = place.name
         address = place.address
         coordinate = hasLocation ? place.coordinate : nil
         day = 0
         symbol = "mappin"
-        searchName = place.name
+        self.searchName = searchName ?? place.name
         self.localName = localName
         self.countryCode = countryCode
+        self.isApproximate = isApproximate || !hasLocation
     }
 }
 
@@ -216,7 +222,7 @@ struct OpenInMapsButton<Label: View>: View {
             Section(menuTitle) {
                 ForEach(place.mapsApps) { app in
                     Button("Open in \(app.name)", systemImage: "map") {
-                        app.open(text: place.searchText(for: app), coordinate: place.coordinate)
+                        app.open(text: place.searchText(for: app), coordinate: place.coordinate, exact: !place.isApproximate)
                     }
                 }
             }
@@ -248,7 +254,7 @@ private struct OpenInMapsDialog: ViewModifier {
         ), titleVisibility: .visible, presenting: place) { place in
             ForEach(place.mapsApps) { app in
                 Button("Open in \(app.name)") {
-                    app.open(text: place.searchText(for: app), coordinate: place.coordinate)
+                    app.open(text: place.searchText(for: app), coordinate: place.coordinate, exact: !place.isApproximate)
                 }
             }
             if place.hasLocalCard {
