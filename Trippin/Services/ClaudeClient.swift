@@ -8,6 +8,8 @@ struct ClaudeClient {
         case api(String)
         case refused
         case emptyResponse
+        /// The network can't reach api.anthropic.com (offline, or blocked, as in mainland China).
+        case unreachable
 
         var errorDescription: String? {
             switch self {
@@ -15,17 +17,63 @@ struct ClaudeClient {
             case .api(let message): message
             case .refused: "Claude declined this request. Try rewording it."
             case .emptyResponse: "Claude didn't return a usable answer. Try again."
+            case .unreachable: "Can't reach Claude from this network. Your trip, maps and saved places still work. Try again later or on another connection."
             }
         }
     }
 
     static let model = "claude-opus-5-5"
-    private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    private static var baseURL: URL {
+        #if DEBUG
+        // -claudeBaseURL lets a debug build simulate a network that can't reach Claude.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-claudeBaseURL"), i + 1 < args.count, let url = URL(string: args[i + 1]) { return url }
+        #endif
+        return URL(string: "https://api.anthropic.com")!
+    }
+    private static var endpoint: URL { baseURL.appending(path: "v1/messages") }
+
+    // MARK: Reachability
+
+    @MainActor private static var lastCheck: (date: Date, reachable: Bool)?
+
+    /// Whether api.anthropic.com answers at all, checked with a short timeout and
+    /// remembered for a minute. Requests themselves need a long timeout (answers can
+    /// take a while), so without this a blocked network would hang for minutes.
+    @MainActor static func isReachable(forceCheck: Bool = false) async -> Bool {
+        if !forceCheck, let last = lastCheck, Date.now.timeIntervalSince(last.date) < 60 { return last.reachable }
+        var request = URLRequest(url: baseURL)
+        request.timeoutInterval = 8
+        request.httpMethod = "HEAD"
+        let reachable: Bool
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            reachable = response is HTTPURLResponse   // any HTTP answer, even 404, means we got through
+        } catch {
+            reachable = false
+        }
+        lastCheck = (.now, reachable)
+        return reachable
+    }
+
+    @MainActor private static func markUnreachable() { lastCheck = (.now, false) }
+
+    /// Network failures that mean "can't get to Claude" rather than a problem with the request.
+    static func isNetworkFailure(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [.notConnectedToInternet, .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+                .dnsLookupFailed, .secureConnectionFailed, .internationalRoamingOff, .dataNotAllowed]
+            .contains(urlError.code)
+    }
 
     var apiKey: String?
 
     init(apiKey: String? = KeychainStore.apiKey) {
         self.apiKey = apiKey
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if self.apiKey == nil, let i = args.firstIndex(of: "-claudeTestKey"), i + 1 < args.count { self.apiKey = args[i + 1] }
+        #endif
     }
 
     /// Sends one request whose answer must match `schema`, and decodes it as `T`.
@@ -38,6 +86,7 @@ struct ClaudeClient {
     func structured<T: Decodable>(_ type: T.Type, system: String, blocks: [ClaudeRequest.Block],
                                   schema: [String: Any], effort: String = "medium") async throws -> T {
         guard let apiKey else { throw ClaudeError.missingKey }
+        guard await Self.isReachable() else { throw ClaudeError.unreachable }
 
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
@@ -49,7 +98,13 @@ struct ClaudeClient {
         request.httpBody = try ClaudeRequest.body(model: Self.model, system: system, blocks: blocks,
                                                   schema: schema, effort: effort)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch where Self.isNetworkFailure(error) {
+            await Self.markUnreachable()
+            throw ClaudeError.unreachable
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data)

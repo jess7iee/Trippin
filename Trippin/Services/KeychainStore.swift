@@ -35,5 +35,10 @@ enum KeychainStore {
         }
     }
 
-    static var hasAPIKey: Bool { apiKey != nil }
+    static var hasAPIKey: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-claudeTestKey") { return true }
+        #endif
+        return apiKey != nil
+    }
 }

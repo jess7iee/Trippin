@@ -15,6 +15,7 @@ struct RecommendationsView: View {
     @State private var results: [Suggestion] = []
     @State private var loading = false
     @State private var error: String?
+    @State private var unreachable = false
     @State private var showingSettings = false
 
     struct Suggestion: Identifiable {
@@ -62,6 +63,8 @@ struct RecommendationsView: View {
                     else if loading { Text("Asking Claude and checking each place in Apple Maps. This can take up to a minute.") }
                 }
 
+                if unreachable { offlineSearchSection }
+
                 ForEach(groupedDays, id: \.self) { day in
                     Section("Day \(day + 1) · \(trip.date(forDay: day).formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))") {
                         ForEach($results) { $s in
@@ -87,6 +90,37 @@ struct RecommendationsView: View {
         }
     }
 
+    /// Without Claude: search each wish (and anything typed) in a maps app near the day's stops.
+    @ViewBuilder private var offlineSearchSection: some View {
+        let searches = (trip.todos.filter { !$0.isDone }.map(\.text) + [extra])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !searches.isEmpty {
+            let day = focusDay ?? 0
+            let center = Self.region(near: day, in: trip)?.center
+            let country = trip.stops(onDay: day).lazy.compactMap(\.countryCode).first ?? trip.stops.lazy.compactMap(\.countryCode).first
+            Section {
+                ForEach(searches, id: \.self) { text in
+                    HStack {
+                        Text(text)
+                        Spacer()
+                        OpenInMapsButton(place: MapPlace(PlaceSearch.Place(name: text, address: nil,
+                                                                           coordinate: center ?? CLLocationCoordinate2D()),
+                                                         countryCode: country,
+                                                         hasLocation: center != nil, isApproximate: true)) {
+                            Image(systemName: "magnifyingglass.circle")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            } header: {
+                Text("Search it yourself")
+            } footer: {
+                Text("Searches near \(focusDay.map { "Day \($0 + 1)" } ?? "your trip")'s places. In China, 大众点评 and Amap have the most up-to-date listings.")
+            }
+        }
+    }
+
     private var groupedDays: [Int] {
         Array(Set(results.map(\.day))).sorted()
     }
@@ -98,6 +132,7 @@ struct RecommendationsView: View {
     private func load() async {
         loading = true
         error = nil
+        unreachable = false
         defer { loading = false }
         let dayPlans = (0..<trip.dayCount).compactMap { day -> String? in
             let stops = trip.stops(onDay: day)
@@ -138,6 +173,9 @@ struct RecommendationsView: View {
                     ? "Everything on your list is planned. Add more to “Want to do”, or describe what you'd like above."
                     : "No recommendations came back. Try adding more detail."
             }
+        } catch ClaudeClient.ClaudeError.unreachable {
+            unreachable = true
+            self.error = ClaudeClient.ClaudeError.unreachable.localizedDescription
         } catch {
             self.error = error.localizedDescription
         }

@@ -132,6 +132,8 @@ struct ImportEmailView: View {
                     note = "Found \(found.count) with Claude. Check the details before saving."
                     return
                 }
+            } catch ClaudeClient.ClaudeError.unreachable {
+                note = "Can't reach Claude from this network, so this was read on your device instead."
             } catch {
                 note = "\(error.localizedDescription) Used the on-device reader instead."
             }
