@@ -13,6 +13,16 @@ struct MapPlace: Identifiable, Equatable {
     var number: Int?
     var localName: String?
     var localAddress: String?
+    /// What to search for in a maps app: the place's own name, without labels
+    /// like "Check in:". For flights and trains, the airport or station.
+    var searchName: String
+    /// ISO country code when known, e.g. "CN".
+    var countryCode: String?
+    /// The coordinate is an estimate (or missing): maps apps search by name instead.
+    var isApproximate = false
+
+    /// The apps worth offering for this place.
+    var mapsApps: [MapsApp] { MapsApp.allCases.filter { $0.isUseful(inCountry: countryCode) } }
 
     static func == (a: MapPlace, b: MapPlace) -> Bool { a.id == b.id && a.number == b.number }
 
@@ -30,7 +40,24 @@ struct MapPlace: Identifiable, Equatable {
         symbol = stop.symbol
         self.number = number
         localName = stop.distinctLocalName
-        localAddress = stop.localAddress
+        localAddress = Self.bestLocalAddress(stop.localAddress, address: stop.address)
+        searchName = Self.searchName(title: stop.reservation?.title ?? stop.name,
+                                     kind: stop.reservation?.kind, address: stop.address)
+        countryCode = stop.countryCode
+        isApproximate = stop.approximateLocation || stop.coordinate == nil
+        if isApproximate, let query = stop.searchQuery, !query.isEmpty { searchName = query }
+    }
+
+    /// The booking's own address when it's already in the local script and fuller
+    /// than the geocoder's (which can be as sparse as "云南").
+    private static func bestLocalAddress(_ local: String?, address: String?) -> String? {
+        if let address, EmailParser.isLocalScript(address), local == nil || address.contains(local!) { return address }
+        return local
+    }
+
+    private static func searchName(title: String, kind: ReservationKind?, address: String?) -> String {
+        if kind?.isJourney == true, let address, !address.isEmpty { return address }
+        return title
     }
 
     init(_ reservation: Reservation) {
@@ -41,16 +68,24 @@ struct MapPlace: Identifiable, Equatable {
         day = 0
         symbol = reservation.kind.symbol
         localName = reservation.localName
-        localAddress = reservation.stops.lazy.compactMap(\.localAddress).first
+        localAddress = Self.bestLocalAddress(reservation.stops.lazy.compactMap(\.localAddress).first, address: reservation.address)
+        searchName = Self.searchName(title: reservation.title, kind: reservation.kind, address: reservation.address)
+        countryCode = reservation.stops.lazy.compactMap(\.countryCode).first
+        isApproximate = reservation.coordinate == nil || reservation.stops.contains(where: \.approximateLocation)
     }
 
-    init(_ place: PlaceSearch.Place) {
+    init(_ place: PlaceSearch.Place, localName: String? = nil, countryCode: String? = nil, hasLocation: Bool = true,
+         isApproximate: Bool = false, searchName: String? = nil) {
         id = place.id
         name = place.name
         address = place.address
-        coordinate = place.coordinate
+        coordinate = hasLocation ? place.coordinate : nil
         day = 0
         symbol = "mappin"
+        self.searchName = searchName ?? place.name
+        self.localName = localName
+        self.countryCode = countryCode
+        self.isApproximate = isApproximate || !hasLocation
     }
 }
 
@@ -64,12 +99,23 @@ struct TripMapView: View {
     var places: [MapPlace]
     var showRoute: Bool
     var routes: [MKRoute] = []
+    var flights: [FlightPath] = []
     @Binding var selection: MapPlace?
 
     @State private var position: MapCameraPosition = .automatic
 
     var body: some View {
         Map(position: $position) {
+            ForEach(flights) { flight in
+                MapPolyline(coordinates: [flight.from, flight.to], contourStyle: .geodesic)
+                    .stroke(DayColor.color(flight.day).opacity(0.85),
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [8, 6]))
+                // Below the point, so it doesn't cover a departure pin (which sits above) at the same airport.
+                Annotation(flight.toCode ?? "Arrival", coordinate: flight.to, anchor: .top) {
+                    arrivalPin(flight)
+                }
+                .annotationTitles(.hidden)
+            }
             ForEach(places) { place in
                 if let coordinate = place.coordinate {
                     Annotation(place.name, coordinate: coordinate, anchor: .bottom) {
@@ -77,6 +123,8 @@ struct TripMapView: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("\(place.name), open in maps")
                     }
+                    // A flight's long title runs off the map; its path and arrival badge say enough.
+                    .annotationTitles(place.symbol == ReservationKind.flight.symbol ? .hidden : .automatic)
                 }
             }
             if showRoute {
@@ -97,8 +145,9 @@ struct TripMapView: View {
             MapCompass()
             MapScaleView()
         }
-        .onChange(of: places.map(\.id)) { _, _ in
-            withAnimation { position = .automatic }
+        .onAppear { position = framing }
+        .onChange(of: places.map(\.id) + flights.map(\.id)) { _, _ in
+            withAnimation { position = framing }
         }
         .overlay {
             if places.isEmpty {
@@ -108,6 +157,30 @@ struct TripMapView: View {
                     .background(.regularMaterial, in: Capsule())
             }
         }
+    }
+
+    /// A lone place gets a neighbourhood-sized view instead of the closest zoom,
+    /// which for an airport shows nothing but a roof.
+    private var framing: MapCameraPosition {
+        let coordinates = places.compactMap(\.coordinate)
+        if flights.isEmpty, coordinates.count == 1, let only = coordinates.first {
+            return .region(MKCoordinateRegion(center: only, latitudinalMeters: 6000, longitudinalMeters: 6000))
+        }
+        return .automatic
+    }
+
+    private func arrivalPin(_ flight: FlightPath) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "airplane.arrival")
+            if let code = flight.toCode { Text(code).monospaced() }
+        }
+        .font(.caption2.weight(.bold))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(DayColor.color(flight.day), in: Capsule())
+        .foregroundStyle(.white)
+        .shadow(radius: 1.5)
+        .accessibilityLabel("Arrival \(flight.toCode ?? "")")
     }
 
     private func pin(_ place: MapPlace) -> some View {
@@ -126,6 +199,51 @@ struct TripMapView: View {
 
 // MARK: - Open in Apple Maps / Google Maps / Amap
 
+extension MapPlace {
+    /// The maps app searches for the place by name (e.g. "Fairfield by Marriott
+    /// Kunming Xishan", not "Check in: …" or the street address). Amap gets the
+    /// local-language name, which it searches best.
+    func searchText(for app: MapsApp) -> String {
+        if app == .amap || app == .dianping, let local = localName, !local.isEmpty { return local }
+        return searchName.isEmpty ? (address ?? name) : searchName
+    }
+
+    var hasLocalCard: Bool { localName != nil || localAddress != nil }
+}
+
+/// A button that opens a small menu right beside it: Open in Apple Maps,
+/// Google Maps or Amap, and the local-language card.
+struct OpenInMapsButton<Label: View>: View {
+    let place: MapPlace
+    @ViewBuilder var label: () -> Label
+    @State private var card: MapPlace?
+
+    var body: some View {
+        Menu {
+            Section(menuTitle) {
+                ForEach(place.mapsApps) { app in
+                    Button("Open in \(app.name)", systemImage: "map") {
+                        app.open(text: place.searchText(for: app), coordinate: place.coordinate, exact: !place.isApproximate)
+                    }
+                }
+            }
+            if place.hasLocalCard {
+                Button("Show in local language", systemImage: "character.bubble") { card = place }
+            }
+        } label: {
+            label()
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("Open \(place.name) in maps")
+        .sheet(item: $card) { LocalNameCard(place: $0) }
+    }
+
+    private var menuTitle: String {
+        [place.searchName, place.localName].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+/// Used for pins on a map: the same choices, shown when `place` is set.
 private struct OpenInMapsDialog: ViewModifier {
     @Binding var place: MapPlace?
     @State private var card: MapPlace?
@@ -135,17 +253,12 @@ private struct OpenInMapsDialog: ViewModifier {
             get: { place != nil },
             set: { if !$0 { place = nil } }
         ), titleVisibility: .visible, presenting: place) { place in
-            ForEach(MapsApp.allCases) { app in
+            ForEach(place.mapsApps) { app in
                 Button("Open in \(app.name)") {
-                    app.open(name: searchName(place, for: app), coordinate: place.coordinate, address: place.address)
+                    app.open(text: place.searchText(for: app), coordinate: place.coordinate, exact: !place.isApproximate)
                 }
             }
-            ForEach(MapsApp.allCases) { app in
-                Button("Directions in \(app.name)") {
-                    app.open(name: searchName(place, for: app), coordinate: place.coordinate, address: place.address, directions: true)
-                }
-            }
-            if place.localName != nil || place.localAddress != nil {
+            if place.hasLocalCard {
                 Button("Show in local language") { card = place }
             }
             Button("Cancel", role: .cancel) {}
@@ -157,11 +270,6 @@ private struct OpenInMapsDialog: ViewModifier {
             }
         }
         .sheet(item: $card) { LocalNameCard(place: $0) }
-    }
-
-    /// Amap searches best with the local (Chinese) name.
-    private func searchName(_ place: MapPlace, for app: MapsApp) -> String {
-        app == .amap ? (place.localName ?? place.name) : place.name
     }
 }
 
@@ -214,6 +322,7 @@ struct LocalNameCard: View {
 
 extension View {
     /// Shows the Apple Maps / Google Maps / Amap picker when `place` is set.
+    /// Attach it to the map whose pins set `place`, so it appears there.
     func openInMapsDialog(place: Binding<MapPlace?>) -> some View {
         modifier(OpenInMapsDialog(place: place))
     }

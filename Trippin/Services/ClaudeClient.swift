@@ -8,6 +8,8 @@ struct ClaudeClient {
         case api(String)
         case refused
         case emptyResponse
+        /// The network can't reach api.anthropic.com (offline, or blocked, as in mainland China).
+        case unreachable
 
         var errorDescription: String? {
             switch self {
@@ -15,36 +17,76 @@ struct ClaudeClient {
             case .api(let message): message
             case .refused: "Claude declined this request. Try rewording it."
             case .emptyResponse: "Claude didn't return a usable answer. Try again."
+            case .unreachable: "Can't reach Claude from this network. Your trip, maps and saved places still work. Try again later or on another connection."
             }
         }
     }
 
     static let model = "claude-opus-5-5"
-    private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    private static var baseURL: URL {
+        #if DEBUG
+        // -claudeBaseURL lets a debug build simulate a network that can't reach Claude.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-claudeBaseURL"), i + 1 < args.count, let url = URL(string: args[i + 1]) { return url }
+        #endif
+        return URL(string: "https://api.anthropic.com")!
+    }
+    private static var endpoint: URL { baseURL.appending(path: "v1/messages") }
+
+    // MARK: Reachability
+
+    @MainActor private static var lastCheck: (date: Date, reachable: Bool)?
+
+    /// Whether api.anthropic.com answers at all, checked with a short timeout and
+    /// remembered for a minute. Requests themselves need a long timeout (answers can
+    /// take a while), so without this a blocked network would hang for minutes.
+    @MainActor static func isReachable(forceCheck: Bool = false) async -> Bool {
+        if !forceCheck, let last = lastCheck, Date.now.timeIntervalSince(last.date) < 60 { return last.reachable }
+        var request = URLRequest(url: baseURL)
+        request.timeoutInterval = 8
+        request.httpMethod = "HEAD"
+        let reachable: Bool
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            reachable = response is HTTPURLResponse   // any HTTP answer, even 404, means we got through
+        } catch {
+            reachable = false
+        }
+        lastCheck = (.now, reachable)
+        return reachable
+    }
+
+    @MainActor private static func markUnreachable() { lastCheck = (.now, false) }
+
+    /// Network failures that mean "can't get to Claude" rather than a problem with the request.
+    static func isNetworkFailure(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [.notConnectedToInternet, .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+                .dnsLookupFailed, .secureConnectionFailed, .internationalRoamingOff, .dataNotAllowed]
+            .contains(urlError.code)
+    }
 
     var apiKey: String?
 
     init(apiKey: String? = KeychainStore.apiKey) {
         self.apiKey = apiKey
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if self.apiKey == nil, let i = args.firstIndex(of: "-claudeTestKey"), i + 1 < args.count { self.apiKey = args[i + 1] }
+        #endif
     }
 
     /// Sends one request whose answer must match `schema`, and decodes it as `T`.
     func structured<T: Decodable>(_ type: T.Type, system: String, prompt: String,
                                   schema: [String: Any], effort: String = "medium") async throws -> T {
-        guard let apiKey else { throw ClaudeError.missingKey }
+        try await structured(type, system: system, blocks: [.init(text: prompt)], schema: schema, effort: effort)
+    }
 
-        let body: [String: Any] = [
-            "model": Self.model,
-            "max_tokens": 16000,
-            "system": system,
-            "messages": [["role": "user", "content": prompt]],
-            "output_config": [
-                "effort": effort,
-                "format": ["type": "json_schema", "schema": schema],
-            ],
-            // If a safety classifier declines, let the API retry on a suitable model.
-            "fallbacks": "default",
-        ]
+    /// Same, with the user message split into blocks so a stable leading part can be cached.
+    func structured<T: Decodable>(_ type: T.Type, system: String, blocks: [ClaudeRequest.Block],
+                                  schema: [String: Any], effort: String = "medium") async throws -> T {
+        guard let apiKey else { throw ClaudeError.missingKey }
+        guard await Self.isReachable() else { throw ClaudeError.unreachable }
 
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
@@ -53,9 +95,16 @@ struct ClaudeClient {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2026-10-21", forHTTPHeaderField: "anthropic-version")
         request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = try ClaudeRequest.body(model: Self.model, system: system, blocks: blocks,
+                                                  schema: schema, effort: effort)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch where Self.isNetworkFailure(error) {
+            await Self.markUnreachable()
+            throw ClaudeError.unreachable
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let apiError = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data)
@@ -67,6 +116,11 @@ struct ClaudeClient {
         }
 
         let message = try JSONDecoder().decode(MessageResponse.self, from: data)
+        #if DEBUG
+        if let u = message.usage {
+            print("Claude usage: input \(u.inputTokens), cache write \(u.cacheCreationInputTokens ?? 0), cache read \(u.cacheReadInputTokens ?? 0), output \(u.outputTokens)")
+        }
+        #endif
         if message.stopReason == "refusal" { throw ClaudeError.refused }
         guard let text = message.content.first(where: { $0.type == "text" })?.text,
               let json = text.data(using: .utf8) else { throw ClaudeError.emptyResponse }
@@ -82,11 +136,25 @@ struct ClaudeClient {
             var type: String
             var text: String?
         }
+        struct Usage: Decodable {
+            var inputTokens: Int
+            var outputTokens: Int
+            var cacheCreationInputTokens: Int?
+            var cacheReadInputTokens: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case inputTokens = "input_tokens"
+                case outputTokens = "output_tokens"
+                case cacheCreationInputTokens = "cache_creation_input_tokens"
+                case cacheReadInputTokens = "cache_read_input_tokens"
+            }
+        }
         var content: [Block]
         var stopReason: String?
+        var usage: Usage?
 
         enum CodingKeys: String, CodingKey {
-            case content
+            case content, usage
             case stopReason = "stop_reason"
         }
     }
@@ -108,6 +176,7 @@ extension ClaudeClient {
             var start: String
             var end: String
             var location: String
+            var arrivalLocation: String
             var localName: String
         }
         var reservations: [Item]
@@ -125,9 +194,10 @@ extension ClaudeClient {
                 "start": ["type": "string", "description": "Local start time as yyyy-MM-dd'T'HH:mm, or yyyy-MM-dd if no time. Empty if unknown."],
                 "end": ["type": "string", "description": "Local end time in the same format, or empty"],
                 "location": ["type": "string", "description": "Street address, or venue name and city, to find it on a map. For flights, the departure airport name."],
+                "arrivalLocation": ["type": "string", "description": "For flights and trains: the arrival airport or station name, to find it on a map, e.g. 'Beijing Capital Airport'. Empty otherwise."],
                 "localName": ["type": "string", "description": "The hotel, restaurant, station or venue name as written in the local language and script, if the email shows it or you know it for certain; otherwise empty"],
             ],
-            "required": ["kind", "title", "confirmationCode", "start", "end", "location", "localName"],
+            "required": ["kind", "title", "confirmationCode", "start", "end", "location", "arrivalLocation", "localName"],
             "additionalProperties": false,
         ]
         let schema: [String: Any] = [
@@ -139,7 +209,11 @@ extension ClaudeClient {
         let system = """
         You read travel confirmation emails and extract each booking: flights (one entry per flight leg), \
         hotels (start = check-in, end = check-out), restaurants, car rentals, trains and activities. \
-        Use the local times written in the email. Return an empty list if the email has no booking.
+        Use the local times written in the email. The text may be a whole itinerary with many bookings; \
+        return each one. Skip notes about things not yet booked. If a date has no year, use the next \
+        occurrence on or after \(Self.today) (a date more than three months before that is next year's). \
+        If a hotel stay has dates but no times, use 15:00 for check-in and 11:00 for check-out. \
+        Return an empty list if the text has no booking.
         """
         let result = try await structured(ExtractionResult.self, system: system,
                                           prompt: "<email>\n\(email)\n</email>", schema: schema, effort: "low")
@@ -151,9 +225,15 @@ extension ClaudeClient {
                 start: Self.parseLocalDate(item.start),
                 end: Self.parseLocalDate(item.end),
                 address: item.location.isEmpty ? nil : item.location,
-                localName: item.localName.isEmpty ? nil : item.localName
+                localName: item.localName.isEmpty ? nil : item.localName,
+                arrivalPlace: item.arrivalLocation.isEmpty ? nil : item.arrivalLocation
             )
         }
+    }
+
+    /// Today's date, so Claude can fill in a missing year.
+    private static var today: String {
+        Date.now.formatted(.iso8601.year().month().day())
     }
 
     static func parseLocalDate(_ string: String) -> Date? {
@@ -238,6 +318,13 @@ struct Recommendation: Decodable, Identifiable, Hashable {
     var forTodo: String
     var suggestedDay: Int
     var durationMinutes: Int
+    /// Street address in the local language, used when Apple Maps can't find the place.
+    var address: String
+    /// The same address in English or pinyin, which Apple's geocoder handles for China.
+    var englishAddress: String
+    /// Approximate location from Claude (0 when unknown), used only as a fallback.
+    var latitude: Double
+    var longitude: Double
 }
 
 extension ClaudeClient {
@@ -253,6 +340,8 @@ extension ClaudeClient {
         var dayPlans: [String]
         var todos: [String]
         var extraRequest: String
+        /// 1-based day to plan for only, or nil for the whole trip.
+        var focusDay: Int? = nil
     }
 
     func recommendations(for context: TripContext) async throws -> [Recommendation] {
@@ -264,11 +353,16 @@ extension ClaudeClient {
                 "searchQuery": ["type": "string", "description": "Query that finds this exact place in Apple Maps, including neighborhood and city"],
                 "category": ["type": "string", "description": "e.g. food, sight, shopping, errand, nightlife"],
                 "reason": ["type": "string", "description": "One sentence on why it fits"],
-                "forTodo": ["type": "string", "description": "The to-do item this answers, or 'general'"],
+                "forTodo": ["type": "string", "description": "The to-do item this answers, copied exactly as written in the list, or 'general'"],
                 "suggestedDay": ["type": "integer", "description": "1-based day number that keeps the day geographically tight"],
                 "durationMinutes": ["type": "integer"],
+                "address": ["type": "string", "description": "Street address in the local language and script (e.g. 北京市东城区王府井大街198号), or empty if unsure"],
+                "englishAddress": ["type": "string", "description": "The street address in English or pinyin, e.g. 'Wangfujing Street, Dongcheng District, Beijing, China'"],
+                "latitude": ["type": "number", "description": "Your best estimate of the latitude (a few hundred meters off is fine); 0 only if you have no idea"],
+                "longitude": ["type": "number", "description": "Your best estimate of the longitude; 0 only if you have no idea"],
             ],
-            "required": ["name", "localName", "searchQuery", "category", "reason", "forTodo", "suggestedDay", "durationMinutes"],
+            "required": ["name", "localName", "searchQuery", "category", "reason", "forTodo", "suggestedDay", "durationMinutes",
+                         "address", "englishAddress", "latitude", "longitude"],
             "additionalProperties": false,
         ]
         let schema: [String: Any] = [
@@ -285,22 +379,72 @@ extension ClaudeClient {
         the day where it sits closest to that day's existing plans, so travel between stops stays short, and \
         avoid overloading any single day. Only suggest places you are confident exist.
         """
-        let prompt = """
+        // The trip and its plan come first and are cached: "Try again" and ideas for
+        // other days of the same trip reuse them. What changes per request goes after.
+        let tripContext = """
         Destination: \(context.destination)
         Trip: \(context.dayCount) days starting \(formatter.string(from: context.startDate))
 
         Current plan:
         \(context.dayPlans.isEmpty ? "(nothing planned yet)" : context.dayPlans.joined(separator: "\n"))
-
+        """
+        let request = """
         Things the traveler wants or needs to do:
         \(context.todos.isEmpty ? "(none listed)" : context.todos.map { "- \($0)" }.joined(separator: "\n"))
         \(context.extraRequest.isEmpty ? "" : "\nAlso: \(context.extraRequest)")
+        \(context.focusDay.map { "\nPlan for Day \($0) only: suggest places near that day's plan and set suggestedDay to \($0) for every suggestion. Don't suggest places already in the plan." } ?? "\nDon't suggest places already in the plan.")
         """
-        let result = try await structured(RecommendationResult.self, system: system, prompt: prompt, schema: schema)
+        let result = try await structured(RecommendationResult.self, system: system,
+                                          blocks: [.init(text: tripContext, cached: true), .init(text: request)],
+                                          schema: schema)
         return result.recommendations.map {
             var rec = $0
-            rec.suggestedDay = min(max(rec.suggestedDay, 1), context.dayCount)
+            rec.suggestedDay = context.focusDay ?? min(max(rec.suggestedDay, 1), context.dayCount)
             return rec
         }
+    }
+}
+
+// MARK: - Estimated locations
+
+extension ClaudeClient {
+    struct PlaceEstimate: Decodable {
+        var latitude: Double
+        var longitude: Double
+        /// Street address in English or pinyin, for showing alongside the local one.
+        var englishAddress: String
+    }
+
+    private struct LocateResult: Decodable {
+        var latitude: Double
+        var longitude: Double
+        var englishAddress: String
+    }
+
+    /// Estimates where a place is when Apple Maps can't find it (common for China
+    /// outside China). Returns nil when Claude can't place it even roughly.
+    func locate(name: String, localName: String?, address: String?) async throws -> PlaceEstimate? {
+        let schema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "latitude": ["type": "number", "description": "Best estimate of the latitude; 0 if you can't place it even roughly"],
+                "longitude": ["type": "number", "description": "Best estimate of the longitude; 0 if you can't place it even roughly"],
+                "englishAddress": ["type": "string", "description": "The address in English or pinyin, or empty"],
+            ],
+            "required": ["latitude", "longitude", "englishAddress"],
+            "additionalProperties": false,
+        ]
+        let system = """
+        You place hotels, restaurants and other venues on a map. Give your best estimate of the coordinates. \
+        If you don't know the exact venue, work from its street address (district, town, street). \
+        Answer 0 for both only if you can't place it within a few kilometers.
+        """
+        let prompt = [("Name", name), ("Local name", localName), ("Address", address)]
+            .compactMap { label, value in value.flatMap { $0.isEmpty ? nil : "\(label): \($0)" } }
+            .joined(separator: "\n")
+        let result = try await structured(LocateResult.self, system: system, prompt: prompt, schema: schema, effort: "low")
+        guard result.latitude != 0 || result.longitude != 0,
+              abs(result.latitude) <= 90, abs(result.longitude) <= 180 else { return nil }
+        return PlaceEstimate(latitude: result.latitude, longitude: result.longitude, englishAddress: result.englishAddress)
     }
 }

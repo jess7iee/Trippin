@@ -10,13 +10,21 @@ struct SummaryView: View {
 
     @State private var newTodo = ""
     @State private var placeToOpen: MapPlace?
+    @State private var detailReservation: Reservation?
+    // Which sections are open. Remembered across launches.
+    @AppStorage("summary.showReservations") private var showReservations = true
+    @AppStorage("summary.showDays") private var showDays = true
+    @AppStorage("summary.showTodos") private var showTodos = true
 
     var body: some View {
         List {
             Section {
-                TripMapView(places: allPlaces, showRoute: false, selection: $placeToOpen)
+                TripMapView(places: allPlaces, showRoute: false,
+                            flights: trip.reservations.compactMap(FlightPath.init), selection: $placeToOpen)
                     .frame(height: 260)
+                    .openInMapsDialog(place: $placeToOpen)
                     .listRowInsets(EdgeInsets())
+                TripDatesRow(trip: trip)
                 HStack {
                     stat("\(trip.dayCount)", "days")
                     Divider()
@@ -27,68 +35,86 @@ struct SummaryView: View {
                 .frame(maxWidth: .infinity)
             }
 
-            Section("Days") {
-                ForEach(0..<trip.dayCount, id: \.self) { day in
-                    Button { withAnimation { page = day } } label: {
-                        HStack {
-                            Circle().fill(DayColor.color(day)).frame(width: 10, height: 10)
-                            Text("Day \(day + 1)").font(.body.weight(.medium))
-                            Text(trip.date(forDay: day).formatted(.dateTime.weekday(.wide).month().day()))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            let names = trip.stops(onDay: day).map(\.name)
-                            Text(names.isEmpty ? "Free day" : names.count == 1 ? "1 stop" : "\(names.count) stops")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                        }
+            Section {
+                if showReservations {
+                    if trip.reservations.isEmpty {
+                        Text("Paste a confirmation email, or share one to Trippin from Mail or Gmail.")
+                            .foregroundStyle(.secondary)
                     }
-                    .foregroundStyle(.primary)
+                    ForEach(trip.sortedReservations) { reservation in
+                        ReservationRow(reservation: reservation)
+                            .contentShape(Rectangle())
+                            .onTapGesture { detailReservation = reservation }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction { detailReservation = reservation }
+                    }
+                    .onDelete { offsets in
+                        let items = trip.sortedReservations
+                        for index in offsets { context.delete(items[index]) }
+                    }
+                    Button(action: onImport) { Label("Add reservation", systemImage: "envelope.open") }
                 }
+            } header: {
+                CollapsibleHeader(title: "Reservations", detail: "\(trip.reservations.count)", isExpanded: $showReservations)
             }
 
             Section {
-                if trip.reservations.isEmpty {
-                    Text("Paste a confirmation email, or share one to Trippin from Mail or Gmail.")
-                        .foregroundStyle(.secondary)
+                if showDays {
+                    ForEach(0..<trip.dayCount, id: \.self) { day in
+                        Button { withAnimation { page = day } } label: {
+                            HStack {
+                                Circle().fill(DayColor.color(day)).frame(width: 10, height: 10)
+                                Text("Day \(day + 1)").font(.body.weight(.medium))
+                                Text(trip.date(forDay: day).formatted(.dateTime.weekday(.wide).month().day()))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                let names = trip.stops(onDay: day).map(\.name)
+                                Text(names.isEmpty ? "Free day" : names.count == 1 ? "1 stop" : "\(names.count) stops")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
                 }
-                ForEach(trip.sortedReservations) { reservation in
-                    ReservationRow(reservation: reservation) { placeToOpen = MapPlace(reservation) }
-                }
-                .onDelete { offsets in
-                    let items = trip.sortedReservations
-                    for index in offsets { context.delete(items[index]) }
-                }
-                Button(action: onImport) { Label("Add reservation from email", systemImage: "envelope.open") }
             } header: {
-                Text("Reservations")
+                CollapsibleHeader(title: "Days", detail: "\(trip.dayCount)", isExpanded: $showDays)
             }
 
             Section {
-                ForEach(trip.todos.sorted { $0.createdAt < $1.createdAt }) { todo in
-                    TodoRow(todo: todo)
+                if showTodos {
+                    ForEach(trip.todos.sorted { ($0.isDone ? 1 : 0, $0.createdAt) < ($1.isDone ? 1 : 0, $1.createdAt) }) { todo in
+                        TodoRow(todo: todo) { context.delete(todo) }
+                    }
+                    HStack {
+                        TextField("Add something you want or need to do", text: $newTodo)
+                            .onSubmit(addTodo)
+                            .submitLabel(.done)
+                        Button(action: addTodo) { Image(systemName: "plus.circle.fill") }
+                            .disabled(newTodo.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .accessibilityLabel("Add to-do")
+                    }
+                    Button(action: onRecommend) { Label("Get recommendations and plan days", systemImage: "sparkles") }
+                        .disabled(trip.todos.isEmpty)
                 }
-                .onDelete { offsets in
-                    let items = trip.todos.sorted { $0.createdAt < $1.createdAt }
-                    for index in offsets { context.delete(items[index]) }
-                }
-                HStack {
-                    TextField("Add something you want or need to do", text: $newTodo)
-                        .onSubmit(addTodo)
-                        .submitLabel(.done)
-                    Button(action: addTodo) { Image(systemName: "plus.circle.fill") }
-                        .disabled(newTodo.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .accessibilityLabel("Add to-do")
-                }
-                Button(action: onRecommend) { Label("Get recommendations and plan days", systemImage: "sparkles") }
-                    .disabled(trip.todos.isEmpty)
             } header: {
-                Text("Want to do")
+                CollapsibleHeader(title: "Want to do", detail: "\(trip.todos.count)", isExpanded: $showTodos)
             } footer: {
-                Text("e.g. “best ramen”, “buy a SIM card”, “teamLab”, “souvenirs for mom”.")
+                if showTodos {
+                    Text("e.g. “best ramen”, “buy a SIM card”, “teamLab”, “souvenirs for mom”.")
+                }
             }
         }
         .listStyle(.insetGrouped)
-        .openInMapsDialog(place: $placeToOpen)
+        .sheet(item: $detailReservation) { ReservationDetailView(reservation: $0) }
+        #if DEBUG
+        .onAppear {
+            let items = trip.sortedReservations
+            if DemoData.openPage == -1, let n = DemoData.openEditor, items.indices.contains(n - 1) {
+                detailReservation = items[n - 1]
+            }
+        }
+        #endif
     }
 
     private var allPlaces: [MapPlace] {
@@ -113,28 +139,142 @@ struct SummaryView: View {
     }
 }
 
-private struct TodoRow: View {
-    @Bindable var todo: TodoItem
+/// A section header you tap to hide or show the section.
+private struct CollapsibleHeader: View {
+    let title: String
+    let detail: String
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        Button { todo.isDone.toggle() } label: {
-            HStack {
-                Image(systemName: todo.isDone ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(todo.isDone ? Color.accentColor : .secondary)
-                Text(todo.text)
-                    .strikethrough(todo.isDone)
-                    .foregroundStyle(todo.isDone ? .secondary : .primary)
+        Button {
+            withAnimation(.snappy) { isExpanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                if !isExpanded {
+                    Text(detail)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                }
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .rotationEffect(.degrees(isExpanded ? 0 : -90))
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(title)
+        .accessibilityValue(isExpanded ? "Shown" : "Hidden, \(detail)")
+        .accessibilityHint(isExpanded ? "Hides this section" : "Shows this section")
+    }
+}
+
+private struct TodoRow: View {
+    @Bindable var todo: TodoItem
+    var onRemove: () -> Void
+
+    var body: some View {
+        HStack {
+            Button { todo.isDone.toggle() } label: {
+                HStack {
+                    Image(systemName: todo.isDone ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(todo.isDone ? Color.accentColor : .secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(todo.text)
+                            .strikethrough(todo.isDone)
+                            .foregroundStyle(todo.isDone ? .secondary : .primary)
+                        if todo.isDone, !todo.plannedAs.isEmpty {
+                            Text("Planned: \(todo.plannedAs)").font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(todo.text)
+            .accessibilityValue(todo.isDone ? "Done" : "Not done")
+
+            Button(role: .destructive, action: onRemove) {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Remove \(todo.text)")
+        }
+        .swipeActions { Button("Remove", systemImage: "trash", role: .destructive, action: onRemove) }
+    }
+}
+
+/// When the trip leaves and comes back: the first and last flight or train if there
+/// are any, otherwise the trip's own dates.
+private struct TripDatesRow: View {
+    let trip: Trip
+
+    var body: some View {
+        HStack(spacing: 0) {
+            end(title: "Departs", date: departure, alignment: .leading)
+            Spacer()
+            Image(systemName: "arrow.right").foregroundStyle(.tertiary)
+            Spacer()
+            end(title: "Returns", date: returning, alignment: .trailing)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var journeys: [Reservation] {
+        trip.sortedReservations.filter { $0.kind.isJourney && $0.start != nil }
+    }
+    private var departure: Date { journeys.first?.start ?? trip.startDate }
+    private var returning: Date { journeys.last.flatMap { $0.start } ?? trip.endDate }
+
+    private func end(title: String, date: Date, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                .font(.headline)
+            Text(date.formatted(.dateTime.year())).font(.caption2).foregroundStyle(.tertiary)
+        }
     }
 }
 
 struct ReservationRow: View {
     let reservation: Reservation
-    var onOpenMap: () -> Void
 
     var body: some View {
+        if let flight = FlightInfo(reservation) {
+            flightBody(flight)
+        } else {
+            standardBody
+        }
+    }
+
+    private func flightBody(_ flight: FlightInfo) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                if let start = reservation.start {
+                    Text(start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                }
+                FlightCard(info: flight)
+                if let code = reservation.confirmationCode {
+                    Text("Booking \(code)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            if reservation.coordinate != nil {
+                OpenInMapsButton(place: MapPlace(reservation)) { Image(systemName: "map") }
+                    .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private var standardBody: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: reservation.kind.symbol)
                 .frame(width: 28, height: 28)
@@ -155,9 +295,8 @@ struct ReservationRow: View {
             }
             Spacer()
             if reservation.coordinate != nil || reservation.address != nil {
-                Button(action: onOpenMap) { Image(systemName: "map") }
+                OpenInMapsButton(place: MapPlace(reservation)) { Image(systemName: "map") }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("Open in maps")
             }
         }
     }

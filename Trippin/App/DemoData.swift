@@ -14,6 +14,14 @@ enum DemoData {
         return Int(args[i + 1])
     }
 
+    /// `-openDemoEditor N` opens the editor for stop N (1-based) on the opened day page,
+    /// or for reservation N on the Summary page.
+    static var openEditor: Int? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-openDemoEditor"), i + 1 < args.count else { return nil }
+        return Int(args[i + 1])
+    }
+
     @MainActor
     static func seedIfNeeded(_ context: ModelContext) {
         guard shouldSeed, (try? context.fetchCount(FetchDescriptor<Trip>())) == 0 else { return }

@@ -10,6 +10,8 @@ struct TripDetailView: View {
     @State private var showingImport = false
     @State private var showingRecommendations = false
     @State private var showingEditor = false
+    @State private var showingPastePlaces = false
+    @State private var showingExport = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,19 +34,28 @@ struct TripDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button { showingImport = true } label: { Label("Add reservation from email", systemImage: "envelope.open") }
-                    Button { showingRecommendations = true } label: { Label("Get recommendations", systemImage: "sparkles") }
+                    Button { showingImport = true } label: { Label("Add reservation", systemImage: "envelope.open") }
+                    Button { showingPastePlaces = true } label: { Label("Paste itinerary", systemImage: "list.bullet.clipboard") }
+                    Button { showingExport = true } label: { Label("Export itinerary", systemImage: "square.and.arrow.up") }
+                    Button { showingRecommendations = true } label: { Label("Recommendations", systemImage: "sparkles") }
                     Button { showingEditor = true } label: { Label("Edit trip", systemImage: "pencil") }
                 } label: {
                     Image(systemName: "plus.circle")
                 }
-                .accessibilityLabel("Add")
+                .accessibilityLabel("Trip options")
             }
         }
         .sheet(isPresented: $showingImport) { ImportEmailView(trip: trip, initialText: "") }
         .sheet(isPresented: $showingRecommendations) { RecommendationsView(trip: trip) }
         .sheet(isPresented: $showingEditor) { TripEditorView(trip: trip) }
-        .task(id: trip.stops.count) {
+        .sheet(isPresented: $showingPastePlaces) { PastePlacesView(trip: trip) }
+        .sheet(isPresented: $showingExport) { ExportTripView(trip: trip) }
+        // Re-runs when stops are added or one moves to a new place.
+        .task {
+            await TripPlanner.repairLocations(trip, context: context)
+            await TripPlanner.locateMissing(trip, context: context)
+        }
+        .task(id: trip.stops.filter { !$0.localLookupDone }.count) {
             await LocalNames.fill(trip, context: context)
         }
         .onChange(of: trip.dayCount) { _, count in
@@ -61,20 +72,31 @@ private struct PagePicker: View {
     @Binding var page: Int
 
     var body: some View {
+        // Summary stays pinned on the left so it's one tap away from any day.
+        HStack(spacing: 0) {
+            chip(title: "Summary", subtitle: nil, tag: -1)
+                .padding(.leading)
+                .padding(.trailing, 8)
+            Divider().frame(height: 32)
+            days
+        }
+    }
+
+    private var days: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    chip(title: "Summary", subtitle: nil, tag: -1)
                     ForEach(0..<trip.dayCount, id: \.self) { day in
                         chip(title: "Day \(day + 1)",
                              subtitle: trip.date(forDay: day).formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
                              tag: day)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 8)
             }
             .onChange(of: page) { _, newValue in
+                guard newValue >= 0 else { return }
                 withAnimation { proxy.scrollTo(newValue, anchor: .center) }
             }
         }

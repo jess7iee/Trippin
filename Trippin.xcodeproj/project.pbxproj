@@ -179,8 +179,8 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				A1B2C3D40000000000000404 /* TrippinTests */,
 				A1B2C3D40000000000000403 /* Shared */,
+				A1B2C3D40000000000000404 /* TrippinTests */,
 			);
 			name = TrippinTests;
 			packageProductDependencies = (

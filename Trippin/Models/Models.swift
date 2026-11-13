@@ -52,6 +52,17 @@ final class Trip {
         stops.filter { $0.dayIndex == index }.sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    /// The hotel you wake up in and return to on a day between check-in and check-out.
+    /// (Check-in and check-out days already have their own stops.)
+    func baseHotel(onDay day: Int) -> Reservation? {
+        reservations.first { r in
+            guard r.kind == .hotel, let start = r.start else { return false }
+            let first = dayIndex(for: start) ?? (start < startDate ? -1 : dayCount)
+            let last = r.end.map { dayIndex(for: $0) ?? ($0 < startDate ? -1 : dayCount) } ?? first + 1
+            return first < day && day < last
+        }
+    }
+
     var sortedReservations: [Reservation] {
         reservations.sorted { ($0.start ?? .distantFuture) < ($1.start ?? .distantFuture) }
     }
@@ -71,6 +82,12 @@ final class Reservation {
     var rawText: String = ""
     /// Name as written locally, e.g. パーク ハイアット 東京.
     var localName: String?
+    /// For flights and trains: where it arrives.
+    var arrivalAddress: String?
+    var arrivalLatitude: Double?
+    var arrivalLongitude: Double?
+    /// Bumped when the way locations are found improves, so older bookings get looked up again.
+    var locationVersion: Int = 0
     var trip: Trip?
 
     @Relationship(deleteRule: .cascade, inverse: \Stop.reservation) var stops: [Stop] = []
@@ -83,6 +100,7 @@ final class Reservation {
         self.end = parsed.end
         self.address = parsed.address
         self.localName = parsed.localName
+        self.arrivalAddress = parsed.arrivalPlace
         self.rawText = rawText
     }
 
@@ -94,6 +112,24 @@ final class Reservation {
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude else { return nil }
         return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    var arrivalCoordinate: CLLocationCoordinate2D? {
+        get {
+            guard let arrivalLatitude, let arrivalLongitude else { return nil }
+            return CLLocationCoordinate2D(latitude: arrivalLatitude, longitude: arrivalLongitude)
+        }
+        set {
+            arrivalLatitude = newValue?.latitude
+            arrivalLongitude = newValue?.longitude
+        }
+    }
+
+    /// The editable fields, for the reservation editor.
+    var fields: ParsedReservation {
+        ParsedReservation(kind: kind, title: title, confirmationCode: confirmationCode,
+                          start: start, end: end, address: address, localName: localName,
+                          arrivalPlace: arrivalAddress)
     }
 }
 
@@ -118,6 +154,14 @@ final class Stop {
     var localAddress: String?
     /// True once the app has looked up the local name and address.
     var localLookupDone: Bool = false
+    /// ISO country code from the geocoder, e.g. "CN". Picks which apps the place can open in.
+    var countryCode: String?
+    /// True when the location is an estimate (Apple Maps didn't list the place).
+    /// Maps apps then search by name instead of dropping a pin there.
+    var approximateLocation: Bool = false
+    /// What to search for in a maps app when the location isn't exact, e.g.
+    /// "Donglaishun Wangfujing, Dongcheng, Beijing".
+    var searchQuery: String?
     var trip: Trip?
     var reservation: Reservation?
 
@@ -142,6 +186,12 @@ final class Stop {
         self.symbol = symbol
     }
 
+    /// For a flight or train stop: where it arrives, so the day's route continues from there.
+    var arrivalCoordinate: CLLocationCoordinate2D? {
+        guard reservation?.kind.isJourney == true else { return nil }
+        return reservation?.arrivalCoordinate
+    }
+
     var coordinate: CLLocationCoordinate2D? {
         get {
             guard let latitude, let longitude else { return nil }
@@ -160,6 +210,8 @@ final class TodoItem {
     var text: String = ""
     var isDone: Bool = false
     var createdAt: Date = Date()
+    /// Places added for it from recommendations, e.g. "Ichiran Shibuya, Fuunji".
+    var plannedAs: String = ""
     var trip: Trip?
 
     init(text: String) {

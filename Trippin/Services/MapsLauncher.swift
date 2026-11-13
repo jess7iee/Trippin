@@ -4,7 +4,7 @@ import CoreLocation
 /// Opens a place in Apple Maps, Google Maps or Amap. Falls back to the
 /// web version when the app isn't installed.
 enum MapsApp: String, CaseIterable, Identifiable {
-    case apple, google, amap
+    case apple, google, amap, dianping
 
     var id: String { rawValue }
 
@@ -13,7 +13,13 @@ enum MapsApp: String, CaseIterable, Identifiable {
         case .apple: "Apple Maps"
         case .google: "Google Maps"
         case .amap: "Amap (高德地图)"
+        case .dianping: "Dianping (大众点评)"
         }
+    }
+
+    /// Dianping only covers mainland China.
+    func isUseful(inCountry code: String?) -> Bool {
+        self != .dianping || code == "CN"
     }
 
     var isInstalled: Bool {
@@ -21,11 +27,18 @@ enum MapsApp: String, CaseIterable, Identifiable {
         case .apple: true
         case .google: UIApplication.shared.canOpenURL(URL(string: "comgooglemaps://")!)
         case .amap: UIApplication.shared.canOpenURL(URL(string: "iosamap://")!)
+        case .dianping: UIApplication.shared.canOpenURL(URL(string: "dianping://")!)
         }
     }
 
-    func url(name: String, coordinate: CLLocationCoordinate2D?, address: String?, directions: Bool) -> URL? {
-        let query = address.map { "\(name), \($0)" } ?? name
+    /// `text` is what the maps app searches for: the place's name.
+    /// An exact coordinate places the pin (Apple Maps, Amap) or centres the map (Google).
+    /// An approximate one only steers the search to the right area, so the app
+    /// still finds the place by name.
+    func url(text: String, coordinate: CLLocationCoordinate2D?, exact: Bool = true, directions: Bool) -> URL? {
+        let query = text, name = text
+        let near = coordinate
+        let coordinate = exact ? coordinate : nil
         var c = URLComponents()
         let ll = coordinate.map { "\($0.latitude),\($0.longitude)" }
 
@@ -37,22 +50,35 @@ enum MapsApp: String, CaseIterable, Identifiable {
                 items.append(URLQueryItem(name: "daddr", value: ll ?? query))
             } else if let ll {
                 items.append(URLQueryItem(name: "ll", value: ll))
-            } else {
-                items[0] = URLQueryItem(name: "q", value: query)
+            } else if let near {
+                // "sll" searches around a point without dropping a pin there.
+                items.append(URLQueryItem(name: "sll", value: "\(near.latitude),\(near.longitude)"))
             }
             c.queryItems = items
 
         case .google:
             if isInstalled {
                 c.scheme = "comgooglemaps"; c.host = ""
+                // Search by name; the coordinate only centres the map on the right area.
                 c.queryItems = directions
-                    ? [URLQueryItem(name: "daddr", value: ll ?? query), URLQueryItem(name: "directionsmode", value: "transit")]
-                    : [URLQueryItem(name: "q", value: ll ?? query), URLQueryItem(name: "zoom", value: "16")]
+                    ? [URLQueryItem(name: "daddr", value: query), URLQueryItem(name: "directionsmode", value: "transit")]
+                    : [URLQueryItem(name: "q", value: query), URLQueryItem(name: "zoom", value: "16")]
+                        + ((ll ?? near.map { "\($0.latitude),\($0.longitude)" }).map { [URLQueryItem(name: "center", value: $0)] } ?? [])
             } else {
                 c.scheme = "https"; c.host = "www.google.com"; c.path = "/maps/" + (directions ? "dir/" : "search/")
                 c.queryItems = directions
-                    ? [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "destination", value: ll ?? query)]
-                    : [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: ll ?? query)]
+                    ? [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "destination", value: query)]
+                    : [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: query)]
+            }
+
+        case .dianping:
+            // Search by name in the app. Dianping has no public web search link,
+            // so without the app, offer it on the App Store.
+            if isInstalled {
+                c.scheme = "dianping"; c.host = "searchshoplist"
+                c.queryItems = [URLQueryItem(name: "keyword", value: query)]
+            } else {
+                c.scheme = "https"; c.host = "apps.apple.com"; c.path = "/app/id351091731"
             }
 
         case .amap:
@@ -75,6 +101,11 @@ enum MapsApp: String, CaseIterable, Identifiable {
                 c.scheme = "iosamap"; c.host = "poi"
                 c.queryItems = [URLQueryItem(name: "sourceApplication", value: "Trippin"),
                                 URLQueryItem(name: "name", value: query)]
+                    + (near.map { [URLQueryItem(name: "lat1", value: "\($0.latitude - 0.2)"),
+                                   URLQueryItem(name: "lon1", value: "\($0.longitude - 0.2)"),
+                                   URLQueryItem(name: "lat2", value: "\($0.latitude + 0.2)"),
+                                   URLQueryItem(name: "lon2", value: "\($0.longitude + 0.2)")] } ?? [])
+                    + [URLQueryItem(name: "dev", value: "0")]
             } else {
                 c.scheme = "https"; c.host = "uri.amap.com"
                 if let coordinate {
@@ -86,6 +117,7 @@ enum MapsApp: String, CaseIterable, Identifiable {
                 } else {
                     c.path = "/search"
                     c.queryItems = [URLQueryItem(name: "keyword", value: query)]
+                        + (near.map { [URLQueryItem(name: "center", value: "\($0.longitude),\($0.latitude)")] } ?? [])
                 }
             }
         }
@@ -93,8 +125,8 @@ enum MapsApp: String, CaseIterable, Identifiable {
     }
 
     @MainActor
-    func open(name: String, coordinate: CLLocationCoordinate2D?, address: String?, directions: Bool = false) {
-        guard let url = url(name: name, coordinate: coordinate, address: address, directions: directions) else { return }
+    func open(text: String, coordinate: CLLocationCoordinate2D?, exact: Bool = true, directions: Bool = false) {
+        guard let url = url(text: text, coordinate: coordinate, exact: exact, directions: directions) else { return }
         UIApplication.shared.open(url)
     }
 }

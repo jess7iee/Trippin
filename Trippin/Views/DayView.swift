@@ -12,6 +12,11 @@ struct DayView: View {
     @State private var routes: [MKRoute] = []
     @State private var transport: Transport = .walking
     @State private var optimizeMessage: String?
+    @State private var detail: Stop?
+    @State private var showingIdeas = false
+    @State private var hotelDetail: Reservation?
+    /// 1 when the day's routes start from the hotel (so stop i's leg is routes[i + 1]).
+    @State private var routeOffset = 0
 
     enum Transport: String, CaseIterable, Identifiable {
         case walking = "Walk", driving = "Drive"
@@ -20,12 +25,15 @@ struct DayView: View {
     }
 
     private var stops: [Stop] { trip.stops(onDay: day) }
+    /// On nights between check-in and check-out, where the day starts and ends.
+    private var hotel: Reservation? { trip.baseHotel(onDay: day) }
 
     var body: some View {
         List {
             Section {
-                TripMapView(places: numberedPlaces, showRoute: true, routes: routes, selection: $placeToOpen)
+                TripMapView(places: numberedPlaces, showRoute: true, routes: routes, flights: flights, selection: $placeToOpen)
                     .frame(height: 280)
+                    .openInMapsDialog(place: $placeToOpen)
                     .listRowInsets(EdgeInsets())
                 HStack {
                     Picker("Travel", selection: $transport) {
@@ -41,16 +49,27 @@ struct DayView: View {
             }
 
             Section {
+                if let hotel {
+                    HotelBaseRow(reservation: hotel, day: day, leg: routeOffset == 1 && !stops.isEmpty ? legText(route: 0, to: stops.first?.name) : nil,
+                                 transport: transport)
+                        .contentShape(Rectangle())
+                        .onTapGesture { hotelDetail = hotel }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { hotelDetail = hotel }
+                }
                 if stops.isEmpty {
-                    Text("Nothing planned yet. Add places, or get recommendations from the Summary page.")
+                    Text("Nothing planned yet. Add a place, or let Claude suggest some.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
                     VStack(alignment: .leading, spacing: 6) {
-                        StopRow(stop: stop, number: index + 1) {
-                            placeToOpen = MapPlace(stop: stop, number: index + 1)
-                        }
-                        if index < routes.count, index + 1 < stops.count, let leg = legText(index) {
+                        StopRow(stop: stop, number: index + 1)
+                        .contentShape(Rectangle())
+                        .onTapGesture { detail = stop }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { detail = stop }
+                        if let leg = legText(route: index + routeOffset,
+                                             to: index + 1 < stops.count ? nil : (hotel != nil ? "the hotel" : "")) {
                             Label(leg, systemImage: transport == .walking ? "figure.walk" : "car")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -62,6 +81,7 @@ struct DayView: View {
                 .onDelete(perform: delete)
 
                 Button { showingSearch = true } label: { Label("Add a place", systemImage: "plus") }
+                Button { showingIdeas = true } label: { Label("Suggest places for this day", systemImage: "sparkles") }
             } header: {
                 HStack {
                     Text(trip.date(forDay: day).formatted(.dateTime.weekday(.wide).month(.wide).day()))
@@ -81,29 +101,58 @@ struct DayView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .openInMapsDialog(place: $placeToOpen)
         .sheet(isPresented: $showingSearch) {
             PlaceSearchView(trip: trip, day: day)
         }
+        .sheet(item: $detail) { StopDetailView(stop: $0, trip: trip) }
+        .sheet(item: $hotelDetail) { ReservationDetailView(reservation: $0) }
+        .sheet(isPresented: $showingIdeas) { RecommendationsView(trip: trip, focusDay: day) }
         .task(id: routeKey) { await loadRoutes() }
+        #if DEBUG
+        .onAppear {
+            if DemoData.openPage == day, let n = DemoData.openEditor, stops.indices.contains(n - 1) {
+                detail = stops[n - 1]
+            }
+        }
+        #endif
+    }
+
+    private var flights: [FlightPath] {
+        var seen = Set<UUID>()
+        return stops.compactMap(\.reservation).filter { seen.insert($0.id).inserted }.compactMap(FlightPath.init)
     }
 
     private var numberedPlaces: [MapPlace] {
-        stops.enumerated().map { MapPlace(stop: $1, number: $0 + 1) }.filter { $0.coordinate != nil }
+        var places = stops.enumerated().map { MapPlace(stop: $1, number: $0 + 1) }.filter { $0.coordinate != nil }
+        if let hotel, hotel.coordinate != nil {
+            var base = MapPlace(hotel)
+            base.day = day
+            places.insert(base, at: 0)
+        }
+        return places
     }
 
     // MARK: Routes
 
     /// Changes whenever the order, locations or travel mode change.
     private var routeKey: String {
-        stops.map { "\($0.id)\($0.latitude ?? 0)\($0.longitude ?? 0)" }.joined() + transport.rawValue
+        stops.map { "\($0.id)\($0.latitude ?? 0)\($0.longitude ?? 0)\($0.arrivalCoordinate?.latitude ?? 0)" }.joined()
+            + transport.rawValue + "\(hotel?.latitude ?? 0),\(hotel?.longitude ?? 0)"
     }
 
     private func loadRoutes() async {
-        let located = stops.compactMap(\.coordinate)
+        // After a flight or train, the next leg starts where it arrives.
+        var located = stops.compactMap { stop in stop.coordinate.map { (start: $0, end: stop.arrivalCoordinate ?? $0) } }
+        // On a day based at a hotel, go out from it and come back to it.
+        let base = hotel?.coordinate
+        if let base, !located.isEmpty {
+            located = [(base, base)] + located + [(base, base)]
+        }
+        routeOffset = base != nil && !located.isEmpty ? 1 : 0
         guard located.count > 1 else { routes = []; return }
         var result: [MKRoute] = []
-        for (a, b) in zip(located, located.dropFirst()) {
+        for (from, next) in zip(located, located.dropFirst()) {
+            let (a, b) = (from.end, next.start)
             let request = MKDirections.Request()
             request.source = MKMapItem(placemark: MKPlacemark(coordinate: a))
             request.destination = MKMapItem(placemark: MKPlacemark(coordinate: b))
@@ -118,11 +167,14 @@ struct DayView: View {
         routes = result
     }
 
-    /// Travel time to the next stop. Only accurate when every stop has a location.
-    private func legText(_ index: Int) -> String? {
-        guard stops.allSatisfy({ $0.coordinate != nil }) else { return nil }
+    /// Travel time for one leg of the day. Only shown when every stop has a location,
+    /// since the legs then line up with the stops. `to` names the destination for the
+    /// last leg ("the hotel"); nil means the next stop, and "" means there's no next leg.
+    private func legText(route index: Int, to destination: String?) -> String? {
+        guard destination != "", index >= 0, index < routes.count,
+              stops.allSatisfy({ $0.coordinate != nil }) else { return nil }
         let route = routes[index]
-        return "\(duration(route.expectedTravelTime)) · \(distance(route.distance)) to next stop"
+        return "\(duration(route.expectedTravelTime)) · \(distance(route.distance)) to \(destination ?? "next stop")"
     }
 
     private var totalTravel: String? {
@@ -166,7 +218,6 @@ struct DayView: View {
 private struct StopRow: View {
     let stop: Stop
     let number: Int
-    var onOpenMap: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -176,20 +227,25 @@ private struct StopRow: View {
                 .background(DayColor.color(stop.dayIndex), in: Circle())
                 .foregroundStyle(.white)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Image(systemName: stop.symbol).foregroundStyle(.secondary).font(.caption)
-                    Text(stop.name).font(.body.weight(.medium))
-                }
-                if let local = stop.distinctLocalName {
-                    Text(local)
-                        .font(.subheadline)
-                        .textSelection(.enabled)
-                        .accessibilityLabel("Local name: \(local)")
-                }
-                if let time = stop.fixedTime {
-                    Text(time.formatted(date: .omitted, time: .shortened))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                if let flight = FlightInfo(stop.reservation) {
+                    FlightCard(info: flight, tint: DayColor.color(stop.dayIndex))
+                        .padding(.trailing, 4)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: stop.symbol).foregroundStyle(.secondary).font(.caption)
+                        Text(stop.name).font(.body.weight(.medium))
+                    }
+                    if let local = stop.distinctLocalName {
+                        Text(local)
+                            .font(.subheadline)
+                            .textSelection(.enabled)
+                            .accessibilityLabel("Local name: \(local)")
+                    }
+                    if let time = stop.fixedTime {
+                        Text(time.formatted(date: .omitted, time: .shortened))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
                 }
                 if !stop.note.isEmpty {
                     Text(stop.note).font(.subheadline).foregroundStyle(.secondary)
@@ -202,9 +258,10 @@ private struct StopRow: View {
                 }
             }
             Spacer()
-            Button(action: onOpenMap) { Image(systemName: "arrow.triangle.turn.up.right.diamond") }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Open in maps")
+            OpenInMapsButton(place: MapPlace(stop: stop, number: number)) {
+                Image(systemName: "arrow.triangle.turn.up.right.diamond")
+            }
+            .buttonStyle(.borderless)
         }
     }
 }
@@ -255,5 +312,48 @@ struct PlaceSearchView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
+    }
+}
+
+/// "Staying at …" at the top of a day spent between check-in and check-out.
+private struct HotelBaseRow: View {
+    let reservation: Reservation
+    let day: Int
+    let leg: String?
+    let transport: DayView.Transport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "bed.double.fill")
+                    .font(.caption.bold())
+                    .frame(width: 26, height: 26)
+                    .background(DayColor.color(day), in: Circle())
+                    .foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Staying at").font(.caption).foregroundStyle(.secondary)
+                    Text(reservation.title).font(.body.weight(.medium))
+                    if let local = reservation.localName, !local.isEmpty, local != reservation.title {
+                        Text(local).font(.subheadline)
+                    }
+                    if let end = reservation.end {
+                        Text("Check out \(end.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer()
+                OpenInMapsButton(place: MapPlace(reservation)) {
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond")
+                }
+                .buttonStyle(.borderless)
+            }
+            if let leg {
+                Label(leg, systemImage: transport == .walking ? "figure.walk" : "car")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 40)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
