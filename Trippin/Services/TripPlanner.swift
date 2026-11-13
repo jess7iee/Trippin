@@ -10,6 +10,7 @@ enum TripPlanner {
     @discardableResult
     static func add(_ parsed: ParsedReservation, rawText: String, to trip: Trip, context: ModelContext) async -> Reservation {
         let reservation = Reservation(from: parsed, rawText: rawText)
+        reservation.locationVersion = currentLocationVersion
         context.insert(reservation)
         reservation.trip = trip
 
@@ -41,6 +42,7 @@ enum TripPlanner {
         reservation.end = parsed.end
         reservation.localName = parsed.localName
         reservation.address = parsed.address
+        reservation.locationVersion = currentLocationVersion
         let arrivalMoved = parsed.arrivalPlace != reservation.arrivalAddress || reservation.arrivalCoordinate == nil
         reservation.arrivalAddress = parsed.arrivalPlace
         if arrivalMoved { reservation.arrivalCoordinate = await locateArrival(parsed, in: trip) }
@@ -74,10 +76,41 @@ enum TripPlanner {
         if let end = parsed.end, parsed.kind.spansDays { trip.extend(toInclude: end) }
     }
 
+    /// Finds a booking on the map. Hotels, restaurants and the like are searched by
+    /// name first (Apple Maps often doesn't know detailed Chinese street addresses),
+    /// then local name, then address. Flights and trains use their departure place.
     private static func locate(_ parsed: ParsedReservation, in trip: Trip) async -> PlaceSearch.Place? {
-        guard let query = parsed.address ?? (parsed.title.isEmpty ? nil : parsed.title) else { return nil }
+        let queries = parsed.kind.isJourney
+            ? [parsed.address ?? ""]
+            : [parsed.title, parsed.localName ?? "", parsed.address ?? ""]
         let region = await PlaceSearch.region(for: trip.destination)
-        return await PlaceSearch.first(query, near: region)
+        return await PlaceSearch.best(queries, near: region)
+    }
+
+    static let currentLocationVersion = 1
+
+    /// Looks up bookings saved before locations were checked for relevance, and
+    /// moves any that had landed somewhere unrelated (e.g. a Kunming hotel placed in Tokyo).
+    static func repairLocations(_ trip: Trip, context: ModelContext) async {
+        let stale = trip.reservations.filter { $0.locationVersion < currentLocationVersion }
+        guard !stale.isEmpty else { return }
+        for reservation in stale {
+            defer { reservation.locationVersion = currentLocationVersion }
+            guard let place = await locate(reservation.fields, in: trip) else { continue }
+            let old = reservation.coordinate.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
+            let new = CLLocation(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
+            guard old == nil || old!.distance(from: new) > 30_000 else { continue }
+            reservation.latitude = place.coordinate.latitude
+            reservation.longitude = place.coordinate.longitude
+            for stop in reservation.stops {
+                stop.coordinate = place.coordinate
+                // The old local address (and any looked-up name) belonged to the wrong place.
+                stop.localAddress = nil
+                if reservation.localName == nil { stop.localName = nil }
+                stop.localLookupDone = false
+            }
+        }
+        try? context.save()
     }
 
     private static func locateArrival(_ parsed: ParsedReservation, in trip: Trip) async -> CLLocationCoordinate2D? {

@@ -75,6 +75,8 @@ final class Reservation {
     var arrivalAddress: String?
     var arrivalLatitude: Double?
     var arrivalLongitude: Double?
+    /// Bumped when the way locations are found improves, so older bookings get looked up again.
+    var locationVersion: Int = 0
     var trip: Trip?
 
     @Relationship(deleteRule: .cascade, inverse: \Stop.reservation) var stops: [Stop] = []

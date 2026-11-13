@@ -45,6 +45,7 @@ struct TripDetailView: View {
         .sheet(isPresented: $showingRecommendations) { RecommendationsView(trip: trip) }
         .sheet(isPresented: $showingEditor) { TripEditorView(trip: trip) }
         // Re-runs when stops are added or one moves to a new place.
+        .task { await TripPlanner.repairLocations(trip, context: context) }
         .task(id: trip.stops.filter { !$0.localLookupDone }.count) {
             await LocalNames.fill(trip, context: context)
         }

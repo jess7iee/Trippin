@@ -29,6 +29,18 @@ enum PlaceSearch {
         await search(query, near: region, limit: 1).first
     }
 
+    /// The first result that actually matches one of the queries, tried in order.
+    /// Loose matches (nothing in common with the query) are skipped.
+    static func best(_ queries: [String], near region: MKCoordinateRegion? = nil) async -> Place? {
+        for query in queries where !query.isEmpty {
+            let results = await search(query, near: region, limit: 5)
+            if let match = results.first(where: { PlaceMatch.isRelevant(query: query, name: $0.name, address: $0.address) }) {
+                return match
+            }
+        }
+        return nil
+    }
+
     /// Region around a destination name, used to bias searches.
     static func region(for destination: String) async -> MKCoordinateRegion? {
         guard !destination.isEmpty, let place = await first(destination) else { return nil }

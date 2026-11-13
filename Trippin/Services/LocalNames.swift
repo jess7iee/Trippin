@@ -20,6 +20,11 @@ enum LocalNames {
             guard let coordinate = stop.coordinate,
                   let placemark = await reverseGeocode(coordinate) else { continue }
             if let language = LocalLanguage.forCountry(placemark.isoCountryCode) {
+                // A booking's own address in the local script (e.g. a full Chinese
+                // address from the confirmation) beats the geocoder's, which can be sparse.
+                if stop.localAddress == nil, let address = stop.address, EmailParser.isLocalScript(address) {
+                    stop.localAddress = address
+                }
                 if stop.localAddress == nil {
                     stop.localAddress = await localAddress(coordinate, language: language)
                 }
