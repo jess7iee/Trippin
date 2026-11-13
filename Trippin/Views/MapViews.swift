@@ -69,11 +69,11 @@ struct MapPlace: Identifiable, Equatable {
         countryCode = reservation.stops.lazy.compactMap(\.countryCode).first
     }
 
-    init(_ place: PlaceSearch.Place, localName: String? = nil, countryCode: String? = nil) {
+    init(_ place: PlaceSearch.Place, localName: String? = nil, countryCode: String? = nil, hasLocation: Bool = true) {
         id = place.id
         name = place.name
         address = place.address
-        coordinate = place.coordinate
+        coordinate = hasLocation ? place.coordinate : nil
         day = 0
         symbol = "mappin"
         searchName = place.name

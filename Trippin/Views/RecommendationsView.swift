@@ -92,7 +92,7 @@ struct RecommendationsView: View {
     }
 
     private var selectedCount: Int {
-        results.filter { $0.selected && $0.place != nil }.count
+        results.filter(\.selected).count
     }
 
     private func load() async {
@@ -126,11 +126,11 @@ struct RecommendationsView: View {
                 let region = Self.region(near: day, in: trip) ?? destinationRegion
                 var place = await PlaceSearch.best([rec.localName, rec.searchQuery, rec.name], near: region)
                 var approximate = false
-                if place == nil, let fallback = Self.claudeLocation(rec, near: region) {
+                if place == nil, let fallback = await Self.fallbackLocation(rec, near: region) {
                     place = fallback
                     approximate = true
                 }
-                found.append(Suggestion(rec: rec, place: place, day: day, selected: place != nil, approximate: approximate))
+                found.append(Suggestion(rec: rec, place: place, day: day, selected: true, approximate: approximate))
             }
             results = found
             if found.isEmpty {
@@ -146,10 +146,17 @@ struct RecommendationsView: View {
     private func addSelected() {
         var touchedDays = Set<Int>()
         for s in results where s.selected {
-            guard var place = s.place else { continue }
+            let symbol = symbol(for: s.rec.category)
+            guard var place = s.place else {
+                TripPlanner.addUnlocatedStop(name: s.rec.name, address: s.rec.address.isEmpty ? nil : s.rec.address,
+                                             localName: s.rec.localName, note: s.rec.reason, symbol: symbol,
+                                             day: s.day, to: trip, context: context)
+                continue
+            }
             place.name = s.rec.name
+            if s.approximate, !s.rec.address.isEmpty { place.address = s.rec.address }
             let note = s.approximate ? s.rec.reason + " (Approximate location; check it in Amap.)" : s.rec.reason
-            TripPlanner.addStop(place, localName: s.rec.localName, note: note, symbol: symbol(for: s.rec.category), day: s.day, to: trip, context: context)
+            TripPlanner.addStop(place, localName: s.rec.localName, note: note, symbol: symbol, day: s.day, to: trip, context: context)
             touchedDays.insert(s.day)
         }
         for day in touchedDays { TripPlanner.optimize(day: day, of: trip) }
@@ -171,6 +178,22 @@ struct RecommendationsView: View {
             let center = CLLocationCoordinate2D(latitude: last.map(\.latitude).reduce(0, +) / Double(last.count),
                                                 longitude: last.map(\.longitude).reduce(0, +) / Double(last.count))
             return MKCoordinateRegion(center: center, latitudinalMeters: 40_000, longitudinalMeters: 40_000)
+        }
+        return nil
+    }
+
+    /// When Apple Maps doesn't list a place: Claude's coordinates, else the English
+    /// address through Apple's geocoder (which can't read Chinese addresses).
+    static func fallbackLocation(_ rec: Recommendation, near region: MKCoordinateRegion?) async -> PlaceSearch.Place? {
+        if let place = claudeLocation(rec, near: region) { return place }
+        for query in [rec.englishAddress, rec.searchQuery] where !query.isEmpty {
+            guard let location = try? await CLGeocoder().geocodeAddressString(query).first?.location else { continue }
+            if let region {
+                let center = CLLocation(latitude: region.center.latitude, longitude: region.center.longitude)
+                guard center.distance(from: location) < 150_000 else { continue }
+            }
+            return PlaceSearch.Place(name: rec.name, address: rec.address.isEmpty ? query : rec.address,
+                                     coordinate: location.coordinate)
         }
         return nil
     }
@@ -224,7 +247,6 @@ private struct SuggestionRow: View {
                         .foregroundStyle(suggestion.selected ? Color.accentColor : .secondary)
                 }
                 .buttonStyle(.borderless)
-                .disabled(suggestion.place == nil)
                 .accessibilityLabel(suggestion.selected ? "Selected" : "Not selected")
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -239,7 +261,8 @@ private struct SuggestionRow: View {
                     }
                     .font(.caption).foregroundStyle(.tertiary)
                     if suggestion.place == nil {
-                        Text("Couldn't find where this is").font(.caption).foregroundStyle(.orange)
+                        Text("No map location yet. You can still add it, then set the place, or open it in Amap or Dianping by name.")
+                            .font(.caption).foregroundStyle(.orange)
                     } else if suggestion.approximate {
                         Label("Apple Maps doesn't list this place; using Claude's approximate location", systemImage: "mappin.slash")
                             .font(.caption).foregroundStyle(.orange)
@@ -249,11 +272,11 @@ private struct SuggestionRow: View {
                     }
                 }
                 Spacer()
-                if let place = suggestion.place {
-                    OpenInMapsButton(place: MapPlace(place, localName: suggestion.rec.localName.isEmpty ? nil : suggestion.rec.localName,
-                                                     countryCode: countryCode)) { Image(systemName: "map") }
-                        .buttonStyle(.borderless)
-                }
+                let place = suggestion.place ?? PlaceSearch.Place(name: suggestion.rec.name, address: suggestion.rec.address,
+                                                                    coordinate: CLLocationCoordinate2D())
+                OpenInMapsButton(place: MapPlace(place, localName: suggestion.rec.localName.isEmpty ? nil : suggestion.rec.localName,
+                                                 countryCode: countryCode, hasLocation: suggestion.place != nil)) { Image(systemName: "map") }
+                    .buttonStyle(.borderless)
             }
             Picker("Day", selection: $suggestion.day) {
                 ForEach(0..<dayCount, id: \.self) { Text("Day \($0 + 1)").tag($0) }

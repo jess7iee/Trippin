@@ -161,6 +161,19 @@ enum TripPlanner {
         return (stops.last?.sortOrder ?? 0) + 1
     }
 
+    /// A stop whose location isn't known yet. It shows "Location not found" with a
+    /// Change place button, and still opens in Amap / Dianping by name.
+    static func addUnlocatedStop(name: String, address: String?, localName: String?, note: String, symbol: String,
+                                 day: Int, to trip: Trip, context: ModelContext) {
+        let order = (trip.stops(onDay: day).last?.sortOrder ?? 0) + 1
+        let stop = Stop(name: name, address: address, dayIndex: day, sortOrder: order, note: note, symbol: symbol)
+        stop.localName = (localName?.isEmpty ?? true) ? nil : localName
+        if let address, EmailParser.isLocalScript(address) { stop.localAddress = address }
+        context.insert(stop)
+        stop.trip = trip
+        try? context.save()
+    }
+
     static func addStop(_ place: PlaceSearch.Place, localName: String? = nil, note: String = "", symbol: String = "mappin",
                         day: Int, to trip: Trip, context: ModelContext) {
         let order = (trip.stops(onDay: day).last?.sortOrder ?? 0) + 1
