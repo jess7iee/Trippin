@@ -250,6 +250,11 @@ struct Recommendation: Decodable, Identifiable, Hashable {
     var forTodo: String
     var suggestedDay: Int
     var durationMinutes: Int
+    /// Street address in the local language, used when Apple Maps can't find the place.
+    var address: String
+    /// Approximate location from Claude (0 when unknown), used only as a fallback.
+    var latitude: Double
+    var longitude: Double
 }
 
 extension ClaudeClient {
@@ -281,8 +286,12 @@ extension ClaudeClient {
                 "forTodo": ["type": "string", "description": "The to-do item this answers, copied exactly as written in the list, or 'general'"],
                 "suggestedDay": ["type": "integer", "description": "1-based day number that keeps the day geographically tight"],
                 "durationMinutes": ["type": "integer"],
+                "address": ["type": "string", "description": "Street address in the local language and script (e.g. 北京市东城区王府井大街198号), or empty if unsure"],
+                "latitude": ["type": "number", "description": "Approximate latitude, or 0 if unsure"],
+                "longitude": ["type": "number", "description": "Approximate longitude, or 0 if unsure"],
             ],
-            "required": ["name", "localName", "searchQuery", "category", "reason", "forTodo", "suggestedDay", "durationMinutes"],
+            "required": ["name", "localName", "searchQuery", "category", "reason", "forTodo", "suggestedDay", "durationMinutes",
+                         "address", "latitude", "longitude"],
             "additionalProperties": false,
         ]
         let schema: [String: Any] = [

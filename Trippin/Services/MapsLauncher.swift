@@ -4,7 +4,7 @@ import CoreLocation
 /// Opens a place in Apple Maps, Google Maps or Amap. Falls back to the
 /// web version when the app isn't installed.
 enum MapsApp: String, CaseIterable, Identifiable {
-    case apple, google, amap
+    case apple, google, amap, dianping
 
     var id: String { rawValue }
 
@@ -13,7 +13,13 @@ enum MapsApp: String, CaseIterable, Identifiable {
         case .apple: "Apple Maps"
         case .google: "Google Maps"
         case .amap: "Amap (高德地图)"
+        case .dianping: "Dianping (大众点评)"
         }
+    }
+
+    /// Dianping only covers mainland China.
+    func isUseful(inCountry code: String?) -> Bool {
+        self != .dianping || code == "CN"
     }
 
     var isInstalled: Bool {
@@ -21,6 +27,7 @@ enum MapsApp: String, CaseIterable, Identifiable {
         case .apple: true
         case .google: UIApplication.shared.canOpenURL(URL(string: "comgooglemaps://")!)
         case .amap: UIApplication.shared.canOpenURL(URL(string: "iosamap://")!)
+        case .dianping: UIApplication.shared.canOpenURL(URL(string: "dianping://")!)
         }
     }
 
@@ -57,6 +64,16 @@ enum MapsApp: String, CaseIterable, Identifiable {
                 c.queryItems = directions
                     ? [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "destination", value: query)]
                     : [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: query)]
+            }
+
+        case .dianping:
+            // Search by name in the app. Dianping has no public web search link,
+            // so without the app, offer it on the App Store.
+            if isInstalled {
+                c.scheme = "dianping"; c.host = "searchshoplist"
+                c.queryItems = [URLQueryItem(name: "keyword", value: query)]
+            } else {
+                c.scheme = "https"; c.host = "apps.apple.com"; c.path = "/app/id351091731"
             }
 
         case .amap:

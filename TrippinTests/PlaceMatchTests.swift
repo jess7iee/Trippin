@@ -17,6 +17,15 @@ struct PlaceMatchTests {
         #expect(PlaceMatch.isRelevant(query: "昆明西山万豪万枫酒店", name: "昆明西山万豪万枫酒店", address: nil))
     }
 
+    @Test func oneSharedPinyinSyllableIsNotEnough() {
+        #expect(!PlaceMatch.isRelevant(query: "Dong Lai Shun Wangfujing, Dongcheng District, Beijing",
+                                      name: "Dong Gao Fang Hu Tong", address: "Dongcheng, Beijing, China"))
+        #expect(!PlaceMatch.isRelevant(query: "Dong Lai Shun Wangfujing, Beijing",
+                                      name: "Renaissance Beijing Wangfujing Hotel", address: "Beijing, China"))
+        #expect(PlaceMatch.isRelevant(query: "Beijing Capital Airport",
+                                     name: "Beijing Capital International Airport", address: "Shunyi, Beijing"))
+    }
+
     @Test func genericWordsAloneDontCount() {
         #expect(!PlaceMatch.isRelevant(query: "StarrySea Hotel", name: "Hotel Sunroute", address: "Shinjuku, Tokyo"))
     }

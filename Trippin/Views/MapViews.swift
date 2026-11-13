@@ -16,6 +16,11 @@ struct MapPlace: Identifiable, Equatable {
     /// What to search for in a maps app: the place's own name, without labels
     /// like "Check in:". For flights and trains, the airport or station.
     var searchName: String
+    /// ISO country code when known, e.g. "CN".
+    var countryCode: String?
+
+    /// The apps worth offering for this place.
+    var mapsApps: [MapsApp] { MapsApp.allCases.filter { $0.isUseful(inCountry: countryCode) } }
 
     static func == (a: MapPlace, b: MapPlace) -> Bool { a.id == b.id && a.number == b.number }
 
@@ -36,6 +41,7 @@ struct MapPlace: Identifiable, Equatable {
         localAddress = Self.bestLocalAddress(stop.localAddress, address: stop.address)
         searchName = Self.searchName(title: stop.reservation?.title ?? stop.name,
                                      kind: stop.reservation?.kind, address: stop.address)
+        countryCode = stop.countryCode
     }
 
     /// The booking's own address when it's already in the local script and fuller
@@ -60,9 +66,10 @@ struct MapPlace: Identifiable, Equatable {
         localName = reservation.localName
         localAddress = Self.bestLocalAddress(reservation.stops.lazy.compactMap(\.localAddress).first, address: reservation.address)
         searchName = Self.searchName(title: reservation.title, kind: reservation.kind, address: reservation.address)
+        countryCode = reservation.stops.lazy.compactMap(\.countryCode).first
     }
 
-    init(_ place: PlaceSearch.Place) {
+    init(_ place: PlaceSearch.Place, localName: String? = nil, countryCode: String? = nil) {
         id = place.id
         name = place.name
         address = place.address
@@ -70,6 +77,8 @@ struct MapPlace: Identifiable, Equatable {
         day = 0
         symbol = "mappin"
         searchName = place.name
+        self.localName = localName
+        self.countryCode = countryCode
     }
 }
 
@@ -188,7 +197,7 @@ extension MapPlace {
     /// Kunming Xishan", not "Check in: …" or the street address). Amap gets the
     /// local-language name, which it searches best.
     func searchText(for app: MapsApp) -> String {
-        if app == .amap, let local = localName, !local.isEmpty { return local }
+        if app == .amap || app == .dianping, let local = localName, !local.isEmpty { return local }
         return searchName.isEmpty ? (address ?? name) : searchName
     }
 
@@ -205,7 +214,7 @@ struct OpenInMapsButton<Label: View>: View {
     var body: some View {
         Menu {
             Section(menuTitle) {
-                ForEach(MapsApp.allCases) { app in
+                ForEach(place.mapsApps) { app in
                     Button("Open in \(app.name)", systemImage: "map") {
                         app.open(text: place.searchText(for: app), coordinate: place.coordinate)
                     }
@@ -237,7 +246,7 @@ private struct OpenInMapsDialog: ViewModifier {
             get: { place != nil },
             set: { if !$0 { place = nil } }
         ), titleVisibility: .visible, presenting: place) { place in
-            ForEach(MapsApp.allCases) { app in
+            ForEach(place.mapsApps) { app in
                 Button("Open in \(app.name)") {
                     app.open(text: place.searchText(for: app), coordinate: place.coordinate)
                 }

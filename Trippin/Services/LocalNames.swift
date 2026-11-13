@@ -12,13 +12,15 @@ enum LocalNames {
 
     /// Looks up local names and addresses for any stops on the trip that don't have them yet.
     static func fill(_ trip: Trip, context: ModelContext) async {
-        let pending = trip.stops.filter { !$0.localLookupDone && $0.coordinate != nil }
+        // Also stops saved before the country was recorded.
+        let pending = trip.stops.filter { (!$0.localLookupDone || $0.countryCode == nil) && $0.coordinate != nil }
         guard !pending.isEmpty else { return }
 
         var needsName: [String: (LocalLanguage, [Stop])] = [:]
         for stop in pending {
             guard let coordinate = stop.coordinate,
                   let placemark = await reverseGeocode(coordinate) else { continue }
+            stop.countryCode = placemark.isoCountryCode
             if let language = LocalLanguage.forCountry(placemark.isoCountryCode) {
                 // A booking's own address in the local script (e.g. a full Chinese
                 // address from the confirmation) beats the geocoder's, which can be sparse.

@@ -23,6 +23,8 @@ struct RecommendationsView: View {
         var place: PlaceSearch.Place?
         var day: Int
         var selected = true
+        /// True when Apple Maps didn't know the place and Claude's location is used.
+        var approximate = false
     }
 
     var body: some View {
@@ -63,7 +65,11 @@ struct RecommendationsView: View {
                 ForEach(groupedDays, id: \.self) { day in
                     Section("Day \(day + 1) · \(trip.date(forDay: day).formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))") {
                         ForEach($results) { $s in
-                            if s.day == day { SuggestionRow(suggestion: $s, dayCount: trip.dayCount) }
+                            if s.day == day {
+                                SuggestionRow(suggestion: $s, dayCount: trip.dayCount,
+                                              countryCode: trip.stops(onDay: day).lazy.compactMap(\.countryCode).first
+                                                ?? trip.stops.lazy.compactMap(\.countryCode).first)
+                            }
                         }
                     }
                 }
@@ -112,11 +118,19 @@ struct RecommendationsView: View {
             focusDay: focusDay.map { $0 + 1 })
         do {
             let recs = try await ClaudeClient().recommendations(for: context)
-            let region = await PlaceSearch.region(for: trip.destination)
+            let destinationRegion = await PlaceSearch.region(for: trip.destination)
             var found: [Suggestion] = []
             for rec in recs {
-                let place = await PlaceSearch.first(rec.searchQuery, near: region)
-                found.append(Suggestion(rec: rec, place: place, day: rec.suggestedDay - 1, selected: place != nil))
+                let day = rec.suggestedDay - 1
+                // Search near that day's own stops (e.g. your Beijing hotel), not the trip's headline city.
+                let region = Self.region(near: day, in: trip) ?? destinationRegion
+                var place = await PlaceSearch.best([rec.localName, rec.searchQuery, rec.name], near: region)
+                var approximate = false
+                if place == nil, let fallback = Self.claudeLocation(rec, near: region) {
+                    place = fallback
+                    approximate = true
+                }
+                found.append(Suggestion(rec: rec, place: place, day: day, selected: place != nil, approximate: approximate))
             }
             results = found
             if found.isEmpty {
@@ -134,13 +148,43 @@ struct RecommendationsView: View {
         for s in results where s.selected {
             guard var place = s.place else { continue }
             place.name = s.rec.name
-            TripPlanner.addStop(place, localName: s.rec.localName, note: s.rec.reason, symbol: symbol(for: s.rec.category), day: s.day, to: trip, context: context)
+            let note = s.approximate ? s.rec.reason + " (Approximate location; check it in Amap.)" : s.rec.reason
+            TripPlanner.addStop(place, localName: s.rec.localName, note: note, symbol: symbol(for: s.rec.category), day: s.day, to: trip, context: context)
             touchedDays.insert(s.day)
         }
         for day in touchedDays { TripPlanner.optimize(day: day, of: trip) }
         tickOffTodos()
         try? context.save()
         dismiss()
+    }
+
+    /// A region around the day's located stops, or the nearest day that has some.
+    static func region(near day: Int, in trip: Trip) -> MKCoordinateRegion? {
+        let offsets = [0] + (1..<max(trip.dayCount, 1)).flatMap { [-$0, $0] }
+        for offset in offsets {
+            let d = day + offset
+            guard d >= 0, d < trip.dayCount else { continue }
+            let points = trip.stops(onDay: d).flatMap { [$0.coordinate, $0.arrivalCoordinate].compactMap { $0 } }
+            guard !points.isEmpty else { continue }
+            // After a flight, the day's later stops are where the traveler is.
+            let last = points.suffix(3)
+            let center = CLLocationCoordinate2D(latitude: last.map(\.latitude).reduce(0, +) / Double(last.count),
+                                                longitude: last.map(\.longitude).reduce(0, +) / Double(last.count))
+            return MKCoordinateRegion(center: center, latitudinalMeters: 40_000, longitudinalMeters: 40_000)
+        }
+        return nil
+    }
+
+    /// Claude's own location for a place, if it gave one near where the day is.
+    static func claudeLocation(_ rec: Recommendation, near region: MKCoordinateRegion?) -> PlaceSearch.Place? {
+        guard rec.latitude != 0 || rec.longitude != 0,
+              abs(rec.latitude) <= 90, abs(rec.longitude) <= 180 else { return nil }
+        let coordinate = CLLocationCoordinate2D(latitude: rec.latitude, longitude: rec.longitude)
+        if let region {
+            let center = CLLocation(latitude: region.center.latitude, longitude: region.center.longitude)
+            guard center.distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)) < 150_000 else { return nil }
+        }
+        return PlaceSearch.Place(name: rec.name, address: rec.address.isEmpty ? nil : rec.address, coordinate: coordinate)
     }
 
     /// Crosses off each to-do that got at least one place, so the next search skips it.
@@ -169,6 +213,7 @@ struct RecommendationsView: View {
 private struct SuggestionRow: View {
     @Binding var suggestion: RecommendationsView.Suggestion
     let dayCount: Int
+    let countryCode: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -194,12 +239,19 @@ private struct SuggestionRow: View {
                     }
                     .font(.caption).foregroundStyle(.tertiary)
                     if suggestion.place == nil {
-                        Text("Couldn't find this in Apple Maps").font(.caption).foregroundStyle(.orange)
+                        Text("Couldn't find where this is").font(.caption).foregroundStyle(.orange)
+                    } else if suggestion.approximate {
+                        Label("Apple Maps doesn't list this place; using Claude's approximate location", systemImage: "mappin.slash")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    if !suggestion.rec.address.isEmpty {
+                        Text(suggestion.rec.address).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 }
                 Spacer()
                 if let place = suggestion.place {
-                    OpenInMapsButton(place: MapPlace(place)) { Image(systemName: "map") }
+                    OpenInMapsButton(place: MapPlace(place, localName: suggestion.rec.localName.isEmpty ? nil : suggestion.rec.localName,
+                                                     countryCode: countryCode)) { Image(systemName: "map") }
                         .buttonStyle(.borderless)
                 }
             }

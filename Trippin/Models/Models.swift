@@ -143,6 +143,8 @@ final class Stop {
     var localAddress: String?
     /// True once the app has looked up the local name and address.
     var localLookupDone: Bool = false
+    /// ISO country code from the geocoder, e.g. "CN". Picks which apps the place can open in.
+    var countryCode: String?
     var trip: Trip?
     var reservation: Reservation?
 

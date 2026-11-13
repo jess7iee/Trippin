@@ -106,6 +106,7 @@ enum TripPlanner {
                 stop.coordinate = place.coordinate
                 // The old local address (and any looked-up name) belonged to the wrong place.
                 stop.localAddress = nil
+                stop.countryCode = nil
                 if reservation.localName == nil { stop.localName = nil }
                 stop.localLookupDone = false
             }
@@ -196,6 +197,7 @@ enum TripPlanner {
         stop.coordinate = place.coordinate
         stop.localName = nil
         stop.localAddress = nil
+        stop.countryCode = nil
         stop.localLookupDone = false
     }
 
