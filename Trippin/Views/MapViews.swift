@@ -33,9 +33,16 @@ struct MapPlace: Identifiable, Equatable {
         symbol = stop.symbol
         self.number = number
         localName = stop.distinctLocalName
-        localAddress = stop.localAddress
+        localAddress = Self.bestLocalAddress(stop.localAddress, address: stop.address)
         searchName = Self.searchName(title: stop.reservation?.title ?? stop.name,
                                      kind: stop.reservation?.kind, address: stop.address)
+    }
+
+    /// The booking's own address when it's already in the local script and fuller
+    /// than the geocoder's (which can be as sparse as "云南").
+    private static func bestLocalAddress(_ local: String?, address: String?) -> String? {
+        if let address, EmailParser.isLocalScript(address), local == nil || address.contains(local!) { return address }
+        return local
     }
 
     private static func searchName(title: String, kind: ReservationKind?, address: String?) -> String {
@@ -51,7 +58,7 @@ struct MapPlace: Identifiable, Equatable {
         day = 0
         symbol = reservation.kind.symbol
         localName = reservation.localName
-        localAddress = reservation.stops.lazy.compactMap(\.localAddress).first
+        localAddress = Self.bestLocalAddress(reservation.stops.lazy.compactMap(\.localAddress).first, address: reservation.address)
         searchName = Self.searchName(title: reservation.title, kind: reservation.kind, address: reservation.address)
     }
 

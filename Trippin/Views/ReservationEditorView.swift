@@ -72,29 +72,11 @@ struct ReservationEditorView: View {
                     Text("Changing the times moves this booking to the matching days. Changing the address finds it on the map again.")
                 }
 
-                if !reservation.stops.isEmpty {
-                    Section("On your itinerary") {
-                        ForEach(reservation.stops.sorted { $0.dayIndex < $1.dayIndex }) { stop in
-                            LabeledContent(stop.name, value: "Day \(stop.dayIndex + 1)")
-                        }
-                    }
-                }
-
-                if !reservation.rawText.isEmpty {
-                    Section {
-                        DisclosureGroup("Original email") {
-                            Text(reservation.rawText)
-                                .font(.caption)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-
                 Section {
                     Button("Delete reservation", role: .destructive) { confirmingDelete = true }
                 }
             }
-            .navigationTitle(reservation.kind.label)
+            .navigationTitle("Edit \(reservation.kind.label.lowercased())")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

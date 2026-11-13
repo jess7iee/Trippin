@@ -10,7 +10,7 @@ struct SummaryView: View {
 
     @State private var newTodo = ""
     @State private var placeToOpen: MapPlace?
-    @State private var editingReservation: Reservation?
+    @State private var detailReservation: Reservation?
     // Which sections are open. Remembered across launches.
     @AppStorage("summary.showReservations") private var showReservations = true
     @AppStorage("summary.showDays") private var showDays = true
@@ -43,8 +43,9 @@ struct SummaryView: View {
                     ForEach(trip.sortedReservations) { reservation in
                         ReservationRow(reservation: reservation)
                             .contentShape(Rectangle())
-                            .onTapGesture { editingReservation = reservation }
-                            .accessibilityAction(named: "Edit") { editingReservation = reservation }
+                            .onTapGesture { detailReservation = reservation }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction { detailReservation = reservation }
                     }
                     .onDelete { offsets in
                         let items = trip.sortedReservations
@@ -108,12 +109,12 @@ struct SummaryView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .sheet(item: $editingReservation) { ReservationEditorView(reservation: $0) }
+        .sheet(item: $detailReservation) { ReservationDetailView(reservation: $0) }
         #if DEBUG
         .onAppear {
             let items = trip.sortedReservations
             if DemoData.openPage == -1, let n = DemoData.openEditor, items.indices.contains(n - 1) {
-                editingReservation = items[n - 1]
+                detailReservation = items[n - 1]
             }
         }
         #endif

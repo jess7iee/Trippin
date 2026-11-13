@@ -9,7 +9,7 @@ An iOS app (SwiftUI + SwiftData, iOS 17+, iPhone and iPad).
 - **Maps:** a map of the whole trip and a routed map for each day, with walking or driving times between stops. Tap any pin or place to open it in **Apple Maps, Google Maps or Amap**, searched by its name. If an app isn't installed, its website opens instead.
 - **Recommendations:** add what you want or need to do on the Summary page. Claude suggests real places, checks each one in Apple Maps and assigns it to the day where it fits best.
 - **Local-language names:** each place also shows its name and address the way they're written locally (浅草寺, 新宿駅, 東京都台東区浅草2丁目3-50), and the open-in-maps menu has a large "Show in local language" card to show a taxi driver. Addresses come from Apple's geocoder. Names come from Claude when a key is set. Amap searches with the local name.
-- **Editing:** tap a stop to rename it, add a note, give it a time, move it to another day or point it at a different place. Tap a reservation to fix its details. Its stops move to the matching days and keep their notes. Bookings without an email can be typed in from Add reservation → Enter details yourself.
+- **Details and editing:** tap a stop or reservation to see its details (time, place, map, booking, original email); tap Edit to rename a stop, add a note, give it a time, move it to another day or point it at a different place. Tap a reservation to fix its details. Its stops move to the matching days and keep their notes. Bookings without an email can be typed in from Add reservation → Enter details yourself.
 - **Route optimization:** reorders a day's stops to cut travel. Bookings with a set time stay in time order.
 
 ## Project layout
