@@ -190,11 +190,6 @@ private struct OpenInMapsDialog: ViewModifier {
                     app.open(text: searchText(place, for: app), coordinate: place.coordinate)
                 }
             }
-            ForEach(MapsApp.allCases) { app in
-                Button("Directions in \(app.name)") {
-                    app.open(text: searchText(place, for: app), coordinate: place.coordinate, directions: true)
-                }
-            }
             if place.localName != nil || place.localAddress != nil {
                 Button("Show in local language") { card = place }
             }
