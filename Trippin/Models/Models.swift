@@ -52,6 +52,17 @@ final class Trip {
         stops.filter { $0.dayIndex == index }.sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    /// The hotel you wake up in and return to on a day between check-in and check-out.
+    /// (Check-in and check-out days already have their own stops.)
+    func baseHotel(onDay day: Int) -> Reservation? {
+        reservations.first { r in
+            guard r.kind == .hotel, let start = r.start else { return false }
+            let first = dayIndex(for: start) ?? (start < startDate ? -1 : dayCount)
+            let last = r.end.map { dayIndex(for: $0) ?? ($0 < startDate ? -1 : dayCount) } ?? first + 1
+            return first < day && day < last
+        }
+    }
+
     var sortedReservations: [Reservation] {
         reservations.sorted { ($0.start ?? .distantFuture) < ($1.start ?? .distantFuture) }
     }

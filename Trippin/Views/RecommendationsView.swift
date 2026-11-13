@@ -214,7 +214,8 @@ struct RecommendationsView: View {
             // Where the traveler ends up that day: a flight's arrival, else the last located stop.
             // (Averaging points would put a San Francisco to Beijing day in the Pacific.)
             guard let center = trip.stops(onDay: d).reversed().lazy
-                    .compactMap({ $0.arrivalCoordinate ?? $0.coordinate }).first else { continue }
+                    .compactMap({ $0.arrivalCoordinate ?? $0.coordinate }).first
+                    ?? trip.baseHotel(onDay: d)?.coordinate else { continue }
             return MKCoordinateRegion(center: center, latitudinalMeters: 40_000, longitudinalMeters: 40_000)
         }
         return nil
